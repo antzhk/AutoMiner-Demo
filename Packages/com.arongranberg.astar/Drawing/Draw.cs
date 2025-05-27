@@ -365,7 +365,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(List&lt;Vector3&gt;,bool)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(List<Vector3>,bool)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -401,7 +401,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray&lt;float3&gt;,bool)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray<float3>,bool)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -465,7 +465,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::WireMesh(NativeArray&lt;float3&gt;,NativeArray&lt;int&gt;)}
+		/// \copydocref{Drawing::CommandBuilder::WireMesh(NativeArray<float3>,NativeArray<int>)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -914,7 +914,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(List&lt;Vector3&gt;,bool,Color)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(List<Vector3>,bool,Color)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -926,7 +926,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(List&lt;Vector3&gt;,Color)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(List<Vector3>,Color)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -986,7 +986,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray&lt;float3&gt;,bool,Color)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray<float3>,bool,Color)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -998,7 +998,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray&lt;float3&gt;,Color)}
+		/// \copydocref{Drawing::CommandBuilder::Polyline(NativeArray<float3>,Color)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]
@@ -1062,7 +1062,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// \copydocref{Drawing::CommandBuilder::WireMesh(NativeArray&lt;float3&gt;,NativeArray&lt;int&gt;,Color)}
+		/// \copydocref{Drawing::CommandBuilder::WireMesh(NativeArray<float3>,NativeArray<int>,Color)}
 		/// Warning: This method cannot be used inside of Burst jobs. See job-system (view in online documentation for working links) instead.
 		/// </summary>
 		[BurstDiscard]

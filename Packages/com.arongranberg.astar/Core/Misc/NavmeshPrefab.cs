@@ -6,7 +6,8 @@ namespace Pathfinding {
 	using Pathfinding.Graphs.Navmesh;
 	using Pathfinding.Jobs;
 	using Pathfinding.Serialization;
-	using Pathfinding.Util;
+	using Pathfinding.Sync;
+	using Pathfinding.Pooling;
 	using Unity.Jobs;
 
 	/// <summary>
@@ -134,9 +135,9 @@ namespace Pathfinding {
 						trisCount += tileMeshes.tileMeshes[i].triangles.Length;
 					}
 
-					var colors = Util.ArrayPool<Color>.Claim(vertexCount);
-					var vertices = Util.ArrayPool<Vector3>.Claim(vertexCount);
-					var triangles = Util.ArrayPool<int>.Claim(trisCount);
+					var colors = ArrayPool<Color>.Claim(vertexCount);
+					var vertices = ArrayPool<Vector3>.Claim(vertexCount);
+					var triangles = ArrayPool<int>.Claim(trisCount);
 					vertexCount = 0;
 					trisCount = 0;
 
@@ -165,9 +166,9 @@ namespace Pathfinding {
 					}
 
 					builder.SolidMesh(vertices, triangles, colors, vertexCount, trisCount);
-					Util.ArrayPool<Color>.Release(ref colors);
-					Util.ArrayPool<Vector3>.Release(ref vertices);
-					Util.ArrayPool<int>.Release(ref triangles);
+					ArrayPool<Color>.Release(ref colors);
+					ArrayPool<Vector3>.Release(ref vertices);
+					ArrayPool<int>.Release(ref triangles);
 
 					builder.Dispose();
 				}
@@ -259,7 +260,7 @@ namespace Pathfinding {
 		public static Bounds SnapSizeToClosestTileMultiple (RecastGraph graph, Bounds bounds) {
 			var tileSize = Mathf.Max(graph.editorTileSize * graph.cellSize, 0.001f);
 			var tiles = new Vector2(bounds.size.x / tileSize, bounds.size.z / tileSize);
-			var roundedTiles = new Int2(Mathf.Max(1, Mathf.RoundToInt(tiles.x)), Mathf.Max(1, Mathf.RoundToInt(tiles.y)));
+			var roundedTiles = new Vector2Int(Mathf.Max(1, Mathf.RoundToInt(tiles.x)), Mathf.Max(1, Mathf.RoundToInt(tiles.y)));
 			return new Bounds(
 				bounds.center,
 				new Vector3(
@@ -280,7 +281,7 @@ namespace Pathfinding {
 			var cornerInGraphSpace2 = localToGraph.MultiplyPoint3x4(bounds.extents);
 			var minInGraphSpace = Vector3.Min(cornerInGraphSpace1, cornerInGraphSpace2);
 			var tileCoordinatesF = Vector3.Scale(minInGraphSpace, new Vector3(1.0f/tileLayout.TileWorldSizeX, 1, 1.0f/tileLayout.TileWorldSizeZ));
-			var tileCoordinates = new Int2(Mathf.RoundToInt(tileCoordinatesF.x), Mathf.RoundToInt(tileCoordinatesF.z));
+			var tileCoordinates = new Vector2Int(Mathf.RoundToInt(tileCoordinatesF.x), Mathf.RoundToInt(tileCoordinatesF.z));
 			var boundsSizeInGraphSpace = new Vector2(bounds.size.x, bounds.size.z);
 			if (((snappedRotation % 2) + 2) % 2 == 1) Util.Memory.Swap(ref boundsSizeInGraphSpace.x, ref boundsSizeInGraphSpace.y);
 			var w = Mathf.Max(1, Mathf.RoundToInt(boundsSizeInGraphSpace.x / tileLayout.TileWorldSizeX));
@@ -360,6 +361,10 @@ namespace Pathfinding {
 				graph.editorTileSize,
 				graph.useTiles
 				);
+			// Disable cropping to the graph's exact bounds, since this can lead to a 1 voxel border on the +X and +Z edges of the prefab,
+			// due to the cropping being conservative, to ensure the nodes are strictly inside the bounds.
+			tileLayout.graphSpaceSize.x = float.PositiveInfinity;
+			tileLayout.graphSpaceSize.z = float.PositiveInfinity;
 			var buildSettings = RecastBuilder.BuildTileMeshes(graph, tileLayout, new IntRect(0, 0, tileLayout.tileCount.x - 1, tileLayout.tileCount.y - 1));
 			buildSettings.scene = this.gameObject.scene;
 

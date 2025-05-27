@@ -7,7 +7,7 @@ using Unity.Burst;
 using Unity.Burst.CompilerServices;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Collections;
 
 	/// <summary>
 	/// Binary heap implementation.
@@ -23,8 +23,20 @@ namespace Pathfinding {
 	/// </summary>
 	[BurstCompile]
 	public struct BinaryHeap {
+		/// <summary>Internal backing array for the heap</summary>
+		private UnsafeSpan<HeapNode> heap;
+
 		/// <summary>Number of items in the tree</summary>
 		public int numberOfItems;
+		uint insertionOrder;
+
+		/// <summary>Ties between elements that have the same F score can be broken by the H score or by insertion order</summary>
+		public TieBreaking tieBreaking;
+
+		public enum TieBreaking : byte {
+			HScore,
+			InsertionOrder,
+		}
 
 		/// <summary>The tree will grow by at least this factor every time it is expanded</summary>
 		public const float GrowthFactor = 2;
@@ -36,18 +48,7 @@ namespace Pathfinding {
 		/// </summary>
 		const int D = 4;
 
-		/// <summary>
-		/// Sort nodes by G score if there is a tie when comparing the F score.
-		/// Disabling this will improve pathfinding performance with around 2.5%
-		/// but may break ties between paths that have the same length in a less
-		/// desirable manner (only relevant for grid graphs).
-		/// </summary>
-		const bool SortGScores = true;
-
 		public const ushort NotInHeap = 0xFFFF;
-
-		/// <summary>Internal backing array for the heap</summary>
-		private UnsafeSpan<HeapNode> heap;
 
 		/// <summary>True if the heap does not contain any elements</summary>
 		public bool isEmpty => numberOfItems <= 0;
@@ -58,9 +59,9 @@ namespace Pathfinding {
 			/// <summary>Bitpacked F and G scores</summary>
 			public ulong sortKey;
 
-			public HeapNode (uint pathNodeIndex, uint g, uint f) {
+			public HeapNode (uint pathNodeIndex, uint tieBreaker, uint f) {
 				this.pathNodeIndex = pathNodeIndex;
-				this.sortKey = ((ulong)f << 32) | (ulong)g;
+				this.sortKey = ((ulong)f << 32) | (ulong)tieBreaker;
 			}
 
 			public uint F {
@@ -68,7 +69,10 @@ namespace Pathfinding {
 				set => sortKey = (sortKey & 0xFFFFFFFFUL) | ((ulong)value << 32);
 			}
 
-			public uint G => (uint)sortKey;
+			public uint TieBreaker {
+				get => (uint)sortKey;
+				set => sortKey = (sortKey & 0xFFFFFFFF00000000UL) | (ulong)value;
+			}
 		}
 
 		/// <summary>
@@ -89,6 +93,8 @@ namespace Pathfinding {
 
 			heap = new UnsafeSpan<HeapNode>(Unity.Collections.Allocator.Persistent, capacity);
 			numberOfItems = 0;
+			insertionOrder = 0;
+			tieBreaking = TieBreaking.HScore;
 		}
 
 		public void Dispose () {
@@ -105,19 +111,29 @@ namespace Pathfinding {
 			}
 
 			numberOfItems = 0;
+			insertionOrder = 0;
 		}
 
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
 		public uint GetPathNodeIndex(int heapIndex) => heap[heapIndex].pathNodeIndex;
 
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-		public uint GetG(int heapIndex) => heap[heapIndex].G;
+		public uint GetH(int heapIndex) => tieBreaking == TieBreaking.HScore ? heap[heapIndex].TieBreaker : 0;
 
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
 		public uint GetF(int heapIndex) => heap[heapIndex].F;
 
+		/// <summary>
+		/// Replaces the H score of a node in the heap.
+		///
+		/// Warning: Assumes that ties are broken by H scores.
+		/// </summary>
 		public void SetH (int heapIndex, uint h) {
-			heap[heapIndex].F = heap[heapIndex].G + h;
+			UnityEngine.Assertions.Assert.IsTrue(tieBreaking == TieBreaking.HScore);
+			ref var node = ref heap[heapIndex];
+			var g = node.F - node.TieBreaker;
+			node.TieBreaker = h;
+			node.F = g + h;
 		}
 
 		/// <summary>Expands to a larger backing array when the current one is too small</summary>
@@ -150,19 +166,23 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Adds a node to the heap</summary>
-		public void Add (UnsafeSpan<PathNode> nodes, uint pathNodeIndex, uint g, uint f) {
-			Add(ref this, ref nodes, pathNodeIndex, g, f);
+		public void Add (UnsafeSpan<PathNode> nodes, uint pathNodeIndex, uint g, uint h) {
+			Add(ref this, ref nodes, pathNodeIndex, g, h, insertionOrder++, tieBreaking);
 		}
 
 		[BurstCompile]
-		static void Add (ref BinaryHeap binaryHeap, ref UnsafeSpan<PathNode> nodes, uint pathNodeIndex, uint g, uint f) {
+		static void Add (ref BinaryHeap binaryHeap, ref UnsafeSpan<PathNode> nodes, uint pathNodeIndex, uint g, uint h, uint insertionOrder, TieBreaking tieBreaking) {
 			ref var numberOfItems = ref binaryHeap.numberOfItems;
 			ref var heap = ref binaryHeap.heap;
+			var f = g + h;
+
+			// We need to shift the insertion order by 2 bits, since there are some bit-stealing shenanigans going on in the Remove method
+			var tieBreaker = tieBreaking == TieBreaking.HScore ? h : (insertionOrder << 2);
 
 			// Check if node is already in the heap
 			ref var node = ref nodes[pathNodeIndex];
 			if (node.heapIndex != NotInHeap) {
-				var activeNode = new HeapNode(pathNodeIndex, g, f);
+				var activeNode = new HeapNode(pathNodeIndex, tieBreaker, f);
 				UnityEngine.Assertions.Assert.AreEqual(activeNode.pathNodeIndex, pathNodeIndex);
 				DecreaseKey(heap, nodes, activeNode, node.heapIndex);
 				Validate(ref nodes, ref binaryHeap);
@@ -172,7 +192,7 @@ namespace Pathfinding {
 				}
 				Validate(ref nodes, ref binaryHeap);
 
-				DecreaseKey(heap, nodes, new HeapNode(pathNodeIndex, g, f), (ushort)numberOfItems);
+				DecreaseKey(heap, nodes, new HeapNode(pathNodeIndex, tieBreaker, f), (ushort)numberOfItems);
 				numberOfItems++;
 				Validate(ref nodes, ref binaryHeap);
 			}
@@ -207,13 +227,20 @@ namespace Pathfinding {
 			nodes[node.pathNodeIndex].heapIndex = (ushort)bubbleIndex;
 		}
 
-		/// <summary>Returns the node with the lowest F score from the heap</summary>
-		public uint Remove (UnsafeSpan<PathNode> nodes, out uint g, out uint f) {
-			return Remove(ref nodes, ref this, out g, out f);
+		/// <summary>
+		/// Returns the node with the lowest F score from the heap.
+		///
+		/// Note: If <see cref="tieBreaking"/> is set not set to HScore, the returned h score will be 0.
+		/// </summary>
+		public uint Remove (UnsafeSpan<PathNode> nodes, out uint g, out uint h) {
+			var index = Remove(ref nodes, ref this, out var removedTieBreaker, out var removedF);
+			h = tieBreaking == TieBreaking.HScore ? removedTieBreaker : 0;
+			g = removedF - h;
+			return index;
 		}
 
 		[BurstCompile]
-		static uint Remove (ref UnsafeSpan<PathNode> nodes, ref BinaryHeap binaryHeap, [NoAlias] out uint removedG, [NoAlias] out uint removedF) {
+		static uint Remove (ref UnsafeSpan<PathNode> nodes, ref BinaryHeap binaryHeap, [NoAlias] out uint removedTieBreaker, [NoAlias] out uint removedF) {
 			ref var numberOfItems = ref binaryHeap.numberOfItems;
 			var heap = binaryHeap.heap;
 
@@ -226,7 +253,7 @@ namespace Pathfinding {
 			Hint.Assume(0UL < heap.length);
 			uint returnIndex = heap[0].pathNodeIndex;
 			nodes[returnIndex].heapIndex = NotInHeap;
-			removedG = heap[0].G;
+			removedTieBreaker = heap[0].TieBreaker;
 			removedF = heap[0].F;
 
 			numberOfItems--;
@@ -238,7 +265,7 @@ namespace Pathfinding {
 			Hint.Assume((uint)numberOfItems < heap.length);
 			var swapItem = heap[numberOfItems];
 			uint swapIndex = 0;
-			ulong comparisonKey = swapItem.sortKey;
+			ulong comparisonKey = swapItem.sortKey & ~0x3UL;
 
 			// Trickle upwards
 			while (true) {
@@ -266,14 +293,15 @@ namespace Pathfinding {
 
 					ulong smallest = l0;
 					// Not all children may exist, so we need to check that the index is valid
+					// TODO: Could optimize by ensuring that the sort keys for invalid children are always set to ulong.MaxValue
 					if (pd+1 < numberOfItems) smallest = math.min(smallest, l1);
 					if (pd+2 < numberOfItems) smallest = math.min(smallest, l2);
 					if (pd+3 < numberOfItems) smallest = math.min(smallest, l3);
 
-					if (smallest < comparisonKey) {
+					if ((smallest & ~0x3UL) < comparisonKey) {
 						swapIndex = pd + (uint)(smallest & 0x3UL);
 
-						// One if the parent's children are smaller or equal, swap them
+						// One of the parent's children are smaller or equal, swap them
 						// (actually we are just pretenting we swapped them, we hold the swapItem
 						// in local variable and only assign it once we know the final index)
 						Hint.Assume(parent < heap.length);

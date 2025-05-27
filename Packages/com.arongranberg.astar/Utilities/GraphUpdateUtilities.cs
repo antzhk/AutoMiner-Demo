@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>
@@ -20,11 +20,11 @@ namespace Pathfinding {
 		/// Returns: True if the given nodes are still reachable from each other after the guo has been applied. False otherwise.
 		///
 		/// <code>
-		/// var guo = new GraphUpdateObject(tower.GetComponent<Collider>().bounds);
+		/// var graphUpdate = new GraphUpdateObject(tower.GetComponent<Collider>().bounds);
 		/// var spawnPointNode = AstarPath.active.GetNearest(spawnPoint.position).node;
 		/// var goalNode = AstarPath.active.GetNearest(goalPoint.position).node;
 		///
-		/// if (GraphUpdateUtilities.UpdateGraphsNoBlock(guo, spawnPointNode, goalNode, false)) {
+		/// if (GraphUpdateUtilities.UpdateGraphsNoBlock(graphUpdate, spawnPointNode, goalNode, false)) {
 		///     // Valid tower position
 		///     // Since the last parameter (which is called "alwaysRevert") in the method call was false
 		///     // The graph is now updated and the game can just continue

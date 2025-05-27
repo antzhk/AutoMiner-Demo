@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Pathfinding.Drawing;
 using Pathfinding.PID;
 using Pathfinding.Util;
+using Pathfinding.Collections;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -15,7 +16,6 @@ namespace Pathfinding.ECS {
 	struct DrawGizmosJobUtils {
 		[BurstCompile]
 		internal static void DrawPath (ref CommandBuilder draw, ref UnsafeSpan<float3> vertices, ref AgentCylinderShape shape) {
-			draw.PushColor(Palette.Colorbrewer.Set1.Orange);
 			// Some people will set the agent's radius to zero. In that case we just draw the path as a polyline as we have no good reference for how to space the symbols.
 			if (shape.radius > 0.01f) {
 				var generator = new CommandBuilder.PolylineWithSymbol(CommandBuilder.SymbolDecoration.ArrowHead, shape.radius * 0.5f, shape.radius * 0.0f, shape.radius * 4f, true);
@@ -23,7 +23,6 @@ namespace Pathfinding.ECS {
 			} else {
 				for (int i = 0; i < vertices.Length - 1; i++) draw.Line(vertices[i], vertices[i+1]);
 			}
-			draw.PopColor();
 		}
 	}
 
@@ -71,6 +70,13 @@ namespace Pathfinding.ECS {
 			}
 		}
 
+		public static readonly UnityEngine.Color VisualRotationColor = Palette.Colorbrewer.Set1.Blue;
+		public static readonly UnityEngine.Color UnsmoothedRotation = Palette.Colorbrewer.Set1.Purple;
+		public static readonly UnityEngine.Color InternalRotation = Palette.Colorbrewer.Set1.Orange;
+		public static readonly UnityEngine.Color TargetInternalRotation = Palette.Colorbrewer.Set1.Yellow;
+		public static readonly UnityEngine.Color TargetInternalRotationHint = Palette.Colorbrewer.Set1.Pink;
+		public static readonly UnityEngine.Color Path = Palette.Colorbrewer.Set1.Orange;
+
 		public void Execute (ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref AgentCylinderShape shape, ManagedState managedState, ref MovementSettings settings, ref MovementState movementState, ref ResolvedMovement resolvedMovement) {
 			if ((settings.debugFlags & PIDMovement.DebugFlags.Funnel) != 0) {
 				managedState.pathTracer.DrawFunnel(draw, movementPlane.value);
@@ -84,19 +90,21 @@ namespace Pathfinding.ECS {
 				var targetInternalRotation = resolvedMovement.targetRotation;
 				var targetInternalRotationHint = resolvedMovement.targetRotationHint;
 				math.sincos(math.PI*0.5f + new float3(visualRotation, unsmoothedRotation, internalRotation), out var s, out var c);
-				draw.xz.ArrowheadArc(p2D, new float2(c.x, s.x), shape.radius * 1.1f, Palette.Colorbrewer.Set1.Blue);
-				draw.xz.ArrowheadArc(p2D, new float2(c.y, s.y), shape.radius * 1.1f, Palette.Colorbrewer.Set1.Purple);
-				draw.xz.ArrowheadArc(p2D, new float2(c.z, s.z), shape.radius * 1.1f, Palette.Colorbrewer.Set1.Orange);
+				draw.xz.ArrowheadArc(p2D, new float2(c.x, s.x), shape.radius * 1.1f, VisualRotationColor);
+				draw.xz.ArrowheadArc(p2D, new float2(c.y, s.y), shape.radius * 1.1f, UnsmoothedRotation);
+				draw.xz.ArrowheadArc(p2D, new float2(c.z, s.z), shape.radius * 1.1f, InternalRotation);
 				math.sincos(math.PI*0.5f + new float2(targetInternalRotation, targetInternalRotationHint), out var s2, out var c2);
-				draw.xz.ArrowheadArc(p2D, new float2(c2.x, s2.x), shape.radius * 1.2f, Palette.Colorbrewer.Set1.Yellow);
-				draw.xz.ArrowheadArc(p2D, new float2(c2.y, s2.y), shape.radius * 1.2f, Palette.Colorbrewer.Set1.Pink);
+				draw.xz.ArrowheadArc(p2D, new float2(c2.x, s2.x), shape.radius * 1.2f, TargetInternalRotation);
+				draw.xz.ArrowheadArc(p2D, new float2(c2.y, s2.y), shape.radius * 1.2f, TargetInternalRotationHint);
 				draw.PopMatrix();
 			}
 			if ((settings.debugFlags & PIDMovement.DebugFlags.Path) != 0 && managedState.pathTracer.hasPath) {
 				scratchBuffer1.Clear();
 				managedState.pathTracer.GetNextCorners(scratchBuffer1, int.MaxValue, ref scratchBuffer2, Allocator.Temp, managedState.pathfindingSettings.traversalProvider, managedState.activePath);
 				var span = scratchBuffer1.AsUnsafeSpan();
+				draw.PushColor(Path);
 				DrawGizmosJobUtils.DrawPath(ref draw, ref span, ref shape);
+				draw.PopColor();
 			}
 		}
 	}

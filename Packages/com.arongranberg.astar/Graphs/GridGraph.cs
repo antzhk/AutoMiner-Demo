@@ -13,10 +13,11 @@ namespace Pathfinding {
 	using Unity.Mathematics;
 	using Pathfinding.Jobs;
 	using Pathfinding.Graphs.Grid.Jobs;
-	using Unity.Burst;
+	using Pathfinding.Collections;
 	using Pathfinding.Drawing;
 	using Pathfinding.Graphs.Grid;
 	using Pathfinding.Graphs.Grid.Rules;
+	using Pathfinding.Pooling;
 	using UnityEngine.Assertions;
 
 	/// <summary>
@@ -26,7 +27,10 @@ namespace Pathfinding {
 	///
 	/// Grid graphs are excellent for when you already have a grid-based world. But they also work well for free-form worlds.
 	///
-	/// Features:
+	/// See: get-started-grid (view in online documentation for working links)
+	/// See: graphTypes (view in online documentation for working links)
+	///
+	/// \section gridgraph-features Features
 	/// - Throw any scene at it, and with minimal configurations you can get a good graph from it.
 	/// - Predictable pattern.
 	/// - Grid graphs work well with penalties and tags.
@@ -41,9 +45,8 @@ namespace Pathfinding {
 	/// - Perfect for terrains since it can make nodes walkable or unwalkable depending on the slope.
 	/// - Only supports a single layer, but you can use a <see cref="LayerGridGraph"/> if you need more layers.
 	///
+	/// \section gridgraph-inspector Inspector
 	/// [Open online documentation to see images]
-	///
-	/// <b>Inspector</b>
 	///
 	/// \inspectorField{Shape, inspectorGridMode}
 	/// \inspectorField{2D, is2D}
@@ -61,6 +64,7 @@ namespace Pathfinding {
 	/// \inspectorField{Account for slopes, maxStepUsesSlope}
 	/// \inspectorField{Max slope, maxSlope}
 	/// \inspectorField{Erosion iterations, erodeIterations}
+	/// \inspectorField{Erosion → Erosion Uses Tags, erosionUseTags}
 	/// \inspectorField{Use 2D physics, collision.use2D}
 	///
 	/// <i>Collision testing</i>
@@ -86,7 +90,7 @@ namespace Pathfinding {
 	/// \inspectorField{Show connections, showNodeConnections}
 	/// \inspectorField{Initial penalty, NavGraph.initialPenalty}
 	///
-	/// <b>Updating the graph during runtime</b>
+	/// \section gridgraph-updating Updating the graph during runtime
 	/// Any graph which implements the IUpdatableGraph interface can be updated during runtime.
 	/// For grid graphs this is a great feature since you can update only a small part of the grid without causing any lag like a complete rescan would.
 	///
@@ -102,7 +106,7 @@ namespace Pathfinding {
 	///
 	/// See: graph-updates (view in online documentation for working links) for more info about updating graphs during runtime
 	///
-	/// <b>Hexagonal graphs</b>
+	/// \section gridgraph-hexagonal Hexagonal graphs
 	/// The graph can be configured to work like a hexagon graph with some simple settings. The grid graph has a Shape dropdown.
 	/// If you set it to 'Hexagonal' the graph will behave as a hexagon graph.
 	/// Often you may want to rotate the graph +45 or -45 degrees.
@@ -111,7 +115,7 @@ namespace Pathfinding {
 	/// Note: Snapping to the closest node is not exactly as you would expect in a real hexagon graph,
 	/// but it is close enough that you will likely not notice.
 	///
-	/// <b>Configure using code</b>
+	/// \section gridgraph-configure-code Configure using code
 	///
 	/// A grid graph can be added and configured completely at runtime via code.
 	///
@@ -138,7 +142,7 @@ namespace Pathfinding {
 	///
 	/// See: runtime-graphs (view in online documentation for working links)
 	///
-	/// <b>Tree colliders</b>
+	/// \section gridgraph-trees Tree colliders
 	/// It seems that Unity will only generate tree colliders at runtime when the game is started.
 	/// For this reason, the grid graph will not pick up tree colliders when outside of play mode
 	/// but it will pick them up once the game starts. If it still does not pick them up
@@ -309,6 +313,8 @@ namespace Pathfinding {
 		/// If false, diagonals will cost more.
 		/// This is useful for a hexagon graph where the diagonals are actually the same length as the
 		/// normal edges (since the graph has been skewed)
+		///
+		/// If the graph is set to hexagonal in the inspector, this will be automatically set to true.
 		/// </summary>
 		[JsonMember]
 		public bool uniformEdgeCosts;
@@ -349,6 +355,7 @@ namespace Pathfinding {
 		/// Instead you can convert it to a dimension on a hexagon using <see cref="ConvertNodeSizeToHexagonSize"/>.
 		///
 		/// See: <see cref="SetDimensions"/>
+		/// See: <see cref="SetGridShape"/>
 		/// </summary>
 		[JsonMember]
 		public float nodeSize = 1;
@@ -847,6 +854,7 @@ namespace Pathfinding {
 		/// </code>
 		/// </summary>
 		public void RelocateNodes (Vector3 center, Quaternion rotation, float nodeSize, float aspectRatio = 1, float isometricAngle = 0) {
+			AssertSafeToUpdateGraph();
 			var previousTransform = transform;
 
 			this.center = center;
@@ -857,16 +865,25 @@ namespace Pathfinding {
 			DirtyBounds(bounds);
 			SetDimensions(width, depth, nodeSize);
 
-			GetNodes(node => {
-				var gnode = node as GridNodeBase;
-				var height = previousTransform.InverseTransform((Vector3)node.position).y;
-				node.position = GraphPointToWorld(gnode.XCoordinateInGrid, gnode.ZCoordinateInGrid, height);
-			});
+			new JobRelocateNodes {
+				previousWorldToGraph = previousTransform.inverseMatrix,
+				graphToWorld = transform.matrix,
+				positions = nodeData.positions,
+				bounds = nodeData.bounds,
+			}.Run();
+
+			var positions = this.nodeData.positions.AsUnsafeSpan();
+			for (int i = 0; i < this.nodes.Length; i++) {
+				var node = this.nodes[i];
+				if (node != null) node.position = (Int3)positions[i];
+			}
 			DirtyBounds(bounds);
 		}
 
 		/// <summary>
 		/// True if the point is inside the bounding box of this graph.
+		///
+		/// This method may be able to use a tighter (non-axis aligned) bounding box than using the one returned by <see cref="bounds"/>.
 		///
 		/// For a graph that uses 2D physics, or if height testing is disabled, then the graph is treated as infinitely tall.
 		/// Otherwise, the height of the graph is determined by <see cref="GraphCollision.fromHeight"/>.
@@ -881,7 +898,8 @@ namespace Pathfinding {
 
 			if (collision.use2D || !collision.heightCheck) return true;
 
-			return local.y >= 0 && local.y <= collision.fromHeight;
+			const float Margin = 0.001f;
+			return local.y >= -Margin && local.y <= collision.fromHeight + Margin;
 		}
 
 		/// <summary>
@@ -1017,6 +1035,21 @@ namespace Pathfinding {
 		///
 		/// [Open online documentation to see images]
 		///
+		/// Note: This will not change the width/height of the graph. It only aligns the graph to the closest orientation so that the grid nodes will be aligned to the cells in the tilemap.
+		/// You can adjust the width/height of the graph separately using e.g. <see cref="SetDimensions"/>.
+		///
+		/// The following parameters will be updated:
+		///
+		/// - <see cref="center"/>
+		/// - <see cref="nodeSize"/>
+		/// - <see cref="isometricAngle"/>
+		/// - <see cref="aspectRatio"/>
+		/// - <see cref="rotation"/>
+		/// - <see cref="uniformEdgeCosts"/>
+		/// - <see cref="neighbours"/>
+		/// - <see cref="inspectorGridMode"/>
+		/// - <see cref="transform"/>
+		///
 		/// See: tilemaps (view in online documentation for working links)
 		/// </summary>
 		public void AlignToTilemap (UnityEngine.GridLayout grid) {
@@ -1118,6 +1151,10 @@ namespace Pathfinding {
 		/// </code>
 		/// </summary>
 		public void SetDimensions (int width, int depth, float nodeSize) {
+			if (width < 1) throw new System.ArgumentOutOfRangeException("width", "width must be at least 1");
+			if (depth < 1) throw new System.ArgumentOutOfRangeException("depth", "depth must be at least 1");
+			if (nodeSize <= 0) throw new System.ArgumentOutOfRangeException("nodeSize", "nodeSize must be greater than 0");
+
 			unclampedSize = new Vector2(width, depth)*nodeSize;
 			this.nodeSize = nodeSize;
 			UpdateTransform();
@@ -1438,6 +1475,22 @@ namespace Pathfinding {
 			}
 		}
 
+		public override NNInfo RandomPointOnSurface (NNConstraint nnConstraint = null, bool highQuality = true) {
+			if (!isScanned || nodes.Length == 0) return NNInfo.Empty;
+
+			// All nodes have the same surface area, so just pick a random node
+			for (int i = 0; i < 10; i++) {
+				var node = this.nodes[UnityEngine.Random.Range(0, this.nodes.Length)];
+				if (node != null && (nnConstraint == null || nnConstraint.Suitable(node))) {
+					return new NNInfo(node, node.RandomPointOnSurface(), 0);
+				}
+			}
+
+			// If a valid node was not found after a few tries, the graph likely contains a lot of unwalkable/unsuitable nodes.
+			// Fall back to the base method which will try to find a valid node by checking all nodes.
+			return base.RandomPointOnSurface(nnConstraint, highQuality);
+		}
+
 		/// <summary>
 		/// Sets up <see cref="neighbourOffsets"/> with the current settings. <see cref="neighbourOffsets"/>, <see cref="neighbourCosts"/>, <see cref="neighbourXOffsets"/> and <see cref="neighbourZOffsets"/> are set up.
 		/// The cost for a non-diagonal movement between two adjacent nodes is RoundToInt (<see cref="nodeSize"/> * Int3.Precision)
@@ -1570,7 +1623,8 @@ namespace Pathfinding {
 						allocationMethod: Allocator.Persistent,
 						recalculationMode: RecalculationMode.RecalculateMinimal,
 						graphUpdateObject: null,
-						ownsJobDependencyTracker: true
+						ownsJobDependencyTracker: true,
+						isFinalUpdate: false
 						);
 				}
 			}
@@ -1664,11 +1718,12 @@ namespace Pathfinding {
 			IntBounds readBounds;
 			IntBounds fullRecalculationBounds;
 			public bool ownsJobDependencyTracker = false;
+			bool isFinalUpdate;
 			GraphTransform transform;
 
 			public int CostEstimate => fullRecalculationBounds.volume;
 
-			public GridGraphUpdatePromise(GridGraph graph, GraphTransform transform, NodesHolder nodes, int3 nodeArrayBounds, IntRect rect, JobDependencyTracker dependencyTracker, JobHandle nodesDependsOn, Allocator allocationMethod, RecalculationMode recalculationMode, GraphUpdateObject graphUpdateObject, bool ownsJobDependencyTracker) {
+			public GridGraphUpdatePromise(GridGraph graph, GraphTransform transform, NodesHolder nodes, int3 nodeArrayBounds, IntRect rect, JobDependencyTracker dependencyTracker, JobHandle nodesDependsOn, Allocator allocationMethod, RecalculationMode recalculationMode, GraphUpdateObject graphUpdateObject, bool ownsJobDependencyTracker, bool isFinalUpdate) {
 				this.graph = graph;
 				this.transform = transform;
 				this.nodes = nodes;
@@ -1679,6 +1734,7 @@ namespace Pathfinding {
 				this.recalculationMode = recalculationMode;
 				this.graphUpdateObject = graphUpdateObject;
 				this.ownsJobDependencyTracker = ownsJobDependencyTracker;
+				this.isFinalUpdate = isFinalUpdate;
 				CalculateRectangles(graph, rect, out this.rect, out var fullRecalculationRect, out var writeMaskRect, out var readRect);
 
 				if (recalculationMode == RecalculationMode.RecalculateFromScratch) {
@@ -1918,6 +1974,7 @@ namespace Pathfinding {
 							nodePositions = context.data.nodes.positions,
 							nodePenalties = context.data.nodes.penalties,
 							nodeWalkable = context.data.nodes.walkable,
+							nodeNormals = context.data.nodes.normals,
 							nodeTags = context.data.nodes.tags,
 							nodeIndices = nodeIndices,
 						}, dependencyTracker);
@@ -1982,6 +2039,7 @@ namespace Pathfinding {
 				graph.AssertSafeToUpdateGraph();
 				if (emptyUpdate) {
 					Dispose();
+					if (isFinalUpdate) graph.rules.ExecuteRuleMainThread(GridGraphRule.Pass.AfterApplied, context ?? new GridGraphRules.Context { graph = graph });
 					return;
 				}
 
@@ -2022,6 +2080,8 @@ namespace Pathfinding {
 				// Recalculate off mesh links in the affected area
 				ctx.DirtyBounds(graph.GetBoundsFromRect(new IntRect(writeMaskBounds.min.x, writeMaskBounds.min.z, writeMaskBounds.max.x - 1, writeMaskBounds.max.z - 1)));
 				Dispose();
+
+				if (isFinalUpdate) graph.rules.ExecuteRuleMainThread(GridGraphRule.Pass.AfterApplied, context);
 			}
 
 			public void Dispose () {
@@ -2075,7 +2135,8 @@ namespace Pathfinding {
 				allocationMethod: Allocator.Persistent,
 				recalculationMode: RecalculationMode.RecalculateFromScratch,
 				graphUpdateObject: null,
-				ownsJobDependencyTracker: true
+				ownsJobDependencyTracker: true,
+				isFinalUpdate: true
 				);
 		}
 
@@ -2088,6 +2149,7 @@ namespace Pathfinding {
 		/// Note: Any other graph updates may overwrite this data.
 		///
 		/// <code>
+		/// // Perform the update when it is safe to do so
 		/// AstarPath.active.AddWorkItem(() => {
 		///     var grid = AstarPath.active.data.gridGraph;
 		///     // Mark all nodes in a 10x10 square, in the top-left corner of the graph, as unwalkable.
@@ -2302,12 +2364,14 @@ namespace Pathfinding {
 						Profiler.BeginSample("Rebuild Retained Gizmo Chunk");
 						using (var helper = GraphGizmoHelper.GetGizmoHelper(gizmos, active, hasher, redrawScope)) {
 							if (showNodeConnections) {
+								if (helper.showSearchTree) helper.builder.PushLineWidth(2);
 								for (int i = 0; i < allNodesCount; i++) {
 									// Don't bother drawing unwalkable nodes
 									if (allNodes[i].Walkable) {
 										helper.DrawConnections(allNodes[i]);
 									}
 								}
+								if (helper.showSearchTree) helper.builder.PopLineWidth();
 							}
 							if (showMeshSurface || showMeshOutline) CreateNavmeshSurfaceVisualization(allNodes, allNodesCount, helper);
 						}
@@ -2497,7 +2561,7 @@ namespace Pathfinding {
 		/// <summary>
 		/// All nodes inside the bounding box.
 		/// Note: Be nice to the garbage collector and pool the list when you are done with it (optional)
-		/// See: Pathfinding.Util.ListPool
+		/// See: Pathfinding.Pooling.ListPool
 		///
 		/// See: GetNodesInRegion(GraphUpdateShape)
 		/// </summary>
@@ -2508,7 +2572,7 @@ namespace Pathfinding {
 		/// <summary>
 		/// All nodes inside the shape.
 		/// Note: Be nice to the garbage collector and pool the list when you are done with it (optional)
-		/// See: Pathfinding.Util.ListPool
+		/// See: Pathfinding.Pooling.ListPool
 		///
 		/// See: GetNodesInRegion(Bounds)
 		/// </summary>
@@ -2655,7 +2719,8 @@ namespace Pathfinding {
 						allocationMethod: Allocator.Persistent,
 						recalculationMode: graphUpdate.updatePhysics ? RecalculationMode.RecalculateMinimal : RecalculationMode.NoRecalculation,
 						graphUpdateObject: graphUpdate,
-						ownsJobDependencyTracker: true
+						ownsJobDependencyTracker: true,
+						isFinalUpdate: i == graphUpdates.Count - 1
 						);
 					promises.Add(promise);
 				}

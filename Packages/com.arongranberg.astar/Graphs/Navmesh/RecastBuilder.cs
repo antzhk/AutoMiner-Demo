@@ -1,4 +1,5 @@
 using Pathfinding.Graphs.Navmesh.Jobs;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Navmesh {
 	/// <summary>Helper methods for scanning a recast graph</summary>
@@ -22,7 +23,7 @@ namespace Pathfinding.Graphs.Navmesh {
 		///     TileMeshes tiles = result.tileMeshes.ToManaged();
 		///     // Take the scanned tiles and place them in the graph,
 		///     // but not at their original location, but 2 tiles away, rotated 90 degrees.
-		///     tiles.tileRect = tiles.tileRect.Offset(new Int2(2, 0));
+		///     tiles.tileRect = tiles.tileRect.Offset(new Vector2Int(2, 0));
 		///     tiles.Rotate(1);
 		///     graph.ReplaceTiles(tiles);
 		///
@@ -44,6 +45,10 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// </summary>
 		public static JobBuildNodes BuildNodeTiles (RecastGraph graph, TileLayout tileLayout) {
 			return new JobBuildNodes(graph, tileLayout);
+		}
+
+		public static TileCutter CutTiles (NavmeshBase graph, GridLookup<NavmeshClipper> cuts, TileLayout tileLayout) {
+			return new TileCutter(graph, cuts, tileLayout);
 		}
 	}
 }

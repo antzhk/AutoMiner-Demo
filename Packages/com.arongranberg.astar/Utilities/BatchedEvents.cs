@@ -83,6 +83,10 @@ namespace Pathfinding.Util {
 			}
 		}
 
+		void OnDisable () {
+			if (instance == this) instance = null;
+		}
+
 		static void CreateInstance () {
 			// If scripts are recompiled the the static variable will be lost.
 			// Some users recompile scripts in play mode and then reload the scene (https://forum.arongranberg.com/t/rts-game-pathfinding/6623/48?u=aron_granberg)

@@ -6,15 +6,17 @@ using UnityEngine;
 namespace Pathfinding.ECS {
 	using Pathfinding;
 
-	[UpdateBefore(typeof(FollowerControlSystem))]
+	[UpdateBefore(typeof(RepairPathSystem))]
 	[UpdateInGroup(typeof(AIMovementSystemGroup))]
 	[RequireMatchingQueriesForUpdate]
 	public partial struct SyncDestinationTransformSystem : ISystem {
-		public void OnCreate (ref SystemState state) {}
-		public void OnDestroy (ref SystemState state) {}
-
 		public void OnUpdate (ref SystemState systemState) {
-			foreach (var(point, destinationSetter) in SystemAPI.Query<RefRW<DestinationPoint>, AIDestinationSetter>()) {
+			// If there will be multiple simulation steps during this frame, only update the destination points on the first step.
+			// It cannot change between simulation steps anyway.
+			if (!AIMovementSystemGroup.TimeScaledRateManager.IsFirstSubstep) return;
+
+			foreach (var(point, destinationSetterWrapper) in SystemAPI.Query<RefRW<DestinationPoint>, SystemAPI.ManagedAPI.UnityEngineComponent<AIDestinationSetter> >()) {
+				var destinationSetter = destinationSetterWrapper.Value;
 				if (destinationSetter.target != null) {
 					point.ValueRW = new DestinationPoint {
 						destination = destinationSetter.target.position,

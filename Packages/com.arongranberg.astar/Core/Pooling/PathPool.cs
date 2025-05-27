@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Pathfinding {
+namespace Pathfinding.Pooling {
 	/// <summary>Pools path objects to reduce load on the garbage collector</summary>
 	public static class PathPool {
 		static readonly Dictionary<Type, Stack<Path> > pool = new Dictionary<Type, Stack<Path> >();

@@ -5,7 +5,7 @@ using Pathfinding.Util;
 using Unity.Mathematics;
 using UnityEngine.Assertions;
 
-namespace Pathfinding.Graphs.Navmesh {
+namespace Pathfinding.Collections {
 	/// <summary>
 	/// Axis Aligned Bounding Box Tree.
 	///

@@ -21,8 +21,8 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 		[WriteOnly]
 		public NativeArray<Vector3> nodePositions;
 
-		public static Vector3 NodePosition (Matrix4x4 graphToWorld, int x, int z) {
-			return graphToWorld.MultiplyPoint3x4(new Vector3(x + 0.5f, 0, z + 0.5f));
+		public static Vector3 NodePosition (Matrix4x4 graphToWorld, int x, int z, float height = 0) {
+			return graphToWorld.MultiplyPoint3x4(new Vector3(x + 0.5f, height, z + 0.5f));
 		}
 
 		public void Execute () {

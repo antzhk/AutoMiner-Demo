@@ -144,7 +144,7 @@ namespace Pathfinding.Drawing {
 		///
 		/// [Open online documentation to see images]
 		///
-		/// See: <see cref="Circle(float3,float3,float)"/>
+		/// See: <see cref="Circle(float3,float,float,float)"/>
 		/// See: <see cref="Arc(float3,float3,float3)"/>
 		/// </summary>
 		/// <param name="center">Center of the circle or arc.</param>
@@ -200,7 +200,7 @@ namespace Pathfinding.Drawing {
 		/// <param name="endAngle">End angle in radians.</param>
 		public void SolidCircle (float3 center, float radius, float startAngle = 0f, float endAngle = 2 * math.PI) {
 			if (xy) draw.PushMatrix(XZ_TO_XY_MATRIX);
-			draw.SolidCircleXZInternal(new float3(center.x, -center.z, center.y), radius, startAngle, endAngle);
+			draw.SolidCircleXZInternal(xy ? new float3(center.x, center.z, center.y) : center, radius, startAngle, endAngle);
 			if (xy) draw.PopMatrix();
 		}
 
@@ -270,7 +270,7 @@ namespace Pathfinding.Drawing {
 			}
 		}
 
-		/// <summary>\copydocref{CommandBuilder.Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{CommandBuilder.Polyline(List<Vector3>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector2> points, bool cycle = false) {
 			for (int i = 0; i < points.Count - 1; i++) {
@@ -297,7 +297,7 @@ namespace Pathfinding.Drawing {
 			if (cycle && points.Length > 1) Line(points[points.Length - 1], points[0]);
 		}
 
-		/// <summary>\copydocref{CommandBuilder.Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{CommandBuilder.Polyline(NativeArray<float3>,bool)}</summary>
 		public void Polyline (NativeArray<float2> points, bool cycle = false) {
 			for (int i = 0; i < points.Length - 1; i++) {
 				Line(points[i], points[i+1]);
@@ -380,7 +380,7 @@ namespace Pathfinding.Drawing {
 		/// See: <see cref="Draw.SolidBox"/>
 		/// </summary>
 		public void SolidRectangle (Rect rect) {
-			draw.SolidPlane(new float3(rect.center.x, rect.center.y, 0.0f), xy ? XY_TO_XZ_ROTATION : XZ_TO_XZ_ROTATION, new float2(rect.width, rect.height));
+			draw.SolidPlane(xy ? new float3(rect.center.x, rect.center.y, 0.0f) : new float3(rect.center.x, 0, rect.center.y), xy ? XY_TO_XZ_ROTATION : XZ_TO_XZ_ROTATION, new float2(rect.width, rect.height));
 		}
 
 		/// <summary>

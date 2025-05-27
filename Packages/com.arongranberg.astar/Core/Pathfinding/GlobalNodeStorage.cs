@@ -3,10 +3,12 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Jobs;
 using UnityEngine.Profiling;
+using Pathfinding.Collections;
 
 namespace Pathfinding {
 	using Pathfinding.Util;
 	using Pathfinding.Jobs;
+	using UnityEngine.Assertions;
 
 	internal class GlobalNodeStorage {
 		readonly AstarPath astar;
@@ -22,16 +24,14 @@ namespace Pathfinding {
 		/// The number of nodes for which path node data has been reserved.
 		/// Will be at least as high as <see cref="nextNodeIndex"/>
 		/// </summary>
-		uint reservedPathNodeData = 0;
+		public uint reservedPathNodeData = 0;
 
 		/// <summary>Number of nodes that have been destroyed in total</summary>
 		public uint destroyedNodesVersion { get; private set; }
 
-#if ASTAR_MORE_MULTI_TARGET_PATH_TARGETS
-		public const int MaxTemporaryNodes = 4096;
-#else
-		public const int MaxTemporaryNodes = 256;
-#endif
+		const int InitialTemporaryNodes = 256;
+
+		int temporaryNodeCount = InitialTemporaryNodes;
 
 		/// <summary>
 		/// Holds indices for nodes that have been destroyed.
@@ -128,7 +128,7 @@ namespace Pathfinding {
 					// Allocate per-thread data.
 					// We allocate using UnsafeSpans because this code may run inside jobs, and Unity does not allow us to allocate NativeArray memory
 					// using the persistent allocator inside jobs.
-					pathfindingThreadData[i].pathNodes = new UnsafeSpan<PathNode>(Allocator.Persistent, (int)reservedPathNodeData + MaxTemporaryNodes);
+					pathfindingThreadData[i].pathNodes = new UnsafeSpan<PathNode>(Allocator.Persistent, (int)reservedPathNodeData + temporaryNodeCount);
 #if UNITY_EDITOR
 					pathfindingThreadData[i].debugPathNodes = new UnsafeSpan<DebugPathNode>(Allocator.Persistent, (int)reservedPathNodeData);
 					pathfindingThreadData[i].debugPathNodes.FillZeros();
@@ -137,6 +137,27 @@ namespace Pathfinding {
 					pnodes.Fill(PathNode.Default);
 				}
 			}
+		}
+
+		/// <summary>
+		/// Grows temporary node storage for the given thread.
+		///
+		/// This can happen if a path traverses a lot of off-mesh links, or if it is a multi-target path with a lot of targets.
+		///
+		/// If enough nodes are created that we have a to grow the regular node storage, then the number of temporary nodes will grow to the same value on all threads.
+		/// </summary>
+		public void GrowTemporaryNodeStorage (int threadID) {
+			var threadData = pathfindingThreadData[threadID];
+			int currentTempNodeCount = threadData.pathNodes.Length - (int)reservedPathNodeData;
+			Assert.IsTrue(currentTempNodeCount >= 0 && currentTempNodeCount <= temporaryNodeCount);
+			// We don't want to grow this often, since we will have to re-allocate the storage for *ALL* nodes,
+			// not just the temporary nodes. So we use a high growth factor.
+			temporaryNodeCount = System.Math.Max(temporaryNodeCount, currentTempNodeCount * 8);
+			var prevLength = threadData.pathNodes.Length;
+			threadData.pathNodes = threadData.pathNodes.Reallocate(Allocator.Persistent, (int)reservedPathNodeData + temporaryNodeCount);
+			// Fill the new nodes with default values
+			threadData.pathNodes.Slice(prevLength).Fill(PathNode.Default);
+			pathfindingThreadData[threadID] = threadData;
 		}
 
 		/// <summary>

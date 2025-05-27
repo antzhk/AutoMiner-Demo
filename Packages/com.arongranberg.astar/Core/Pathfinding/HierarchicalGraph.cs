@@ -10,9 +10,11 @@ namespace Pathfinding {
 	using System.Runtime.InteropServices;
 	using Pathfinding.Drawing;
 	using Pathfinding.Jobs;
+	using Pathfinding.Collections;
+	using Pathfinding.Sync;
+	using Pathfinding.Pooling;
 	using Unity.Collections;
 	using Unity.Collections.LowLevel.Unsafe;
-	using Unity.Mathematics;
 
 	/// <summary>
 	/// Holds a hierarchical graph to speed up certain pathfinding queries.
@@ -412,6 +414,10 @@ namespace Pathfinding {
 
 				while (queue.Count > 0) queue.Dequeue().GetConnections(visitConnection, ref context, Connection.IncomingConnection | Connection.OutgoingConnection);
 
+				if (hGraph.currentConnections.Count > SlabAllocator<int>.MaxAllocationSize) {
+					throw new System.Exception("Too many connections for a single hierarchical node. Do you have thousands of off-mesh links in a single location?");
+				}
+
 				for (int i = 0; i < hGraph.currentConnections.Count; i++) {
 					var otherHierarchicalNode = hGraph.currentConnections[i];
 					Assert.AreNotEqual(otherHierarchicalNode, 0);
@@ -540,7 +546,8 @@ namespace Pathfinding {
 		/// Note: Assumes the graph is unchanged until the returned dependency is completed.
 		/// </summary>
 		public JobHandle JobRecalculateIfNecessary (JobHandle dependsOn = default) {
-			OnEnable();
+			if (!connectionAllocator.IsCreated) throw new System.InvalidOperationException("The hierarchical graph has not been initialized. Please call OnEnable before using it.");
+
 			if (!dirtyNodes.IsEmpty) {
 				var writeLock = rwLock.Write();
 				var lastJob = new JobRecalculateComponents {

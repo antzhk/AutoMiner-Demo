@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Util {
 	using Pathfinding.Drawing;
@@ -172,7 +173,7 @@ namespace Pathfinding.Graphs.Util {
 			rval = (uint)seed;
 
 			// Get a List<GraphNode> from a pool
-			var pivotList = Pathfinding.Util.ListPool<GraphNode>.Claim();
+			var pivotList = Pathfinding.Pooling.ListPool<GraphNode>.Claim();
 
 			switch (mode) {
 			case HeuristicOptimizationMode.Custom:
@@ -196,8 +197,8 @@ namespace Pathfinding.Graphs.Util {
 					if (first != null) {
 						pivotList.Add(first);
 					} else {
-						Debug.LogError("Could not find any walkable node in any of the graphs.");
-						Pathfinding.Util.ListPool<GraphNode>.Release(ref pivotList);
+						Pathfinding.Pooling.ListPool<GraphNode>.Release(ref pivotList);
+						pivots = new GraphNode[0];
 						return;
 					}
 				}
@@ -212,7 +213,7 @@ namespace Pathfinding.Graphs.Util {
 
 			pivots = pivotList.ToArray();
 
-			Pathfinding.Util.ListPool<GraphNode>.Release(ref pivotList);
+			Pathfinding.Pooling.ListPool<GraphNode>.Release(ref pivotList);
 		}
 
 		class EuclideanEmbeddingSearchPath : Path {
@@ -356,7 +357,7 @@ namespace Pathfinding.Graphs.Util {
 				for (int i = 0; i < pivots.Length; i++) {
 					startCostCalculation(i);
 				}
-			} else {
+			} else if (pivots.Length > 0) {
 				// Recursive and serial
 				startCostCalculation(0);
 			}

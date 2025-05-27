@@ -9,4 +9,3 @@ ASTAR_RECAST_LARGER_TILES            ; Raises the vertex count limit on recast t
 ProfileAstar                         ; Enables profiling of the pathfinding process.
 ASTAR_UNITY_PRO_PROFILER             ; Requires ProfileAstar, profiles section of astar code which will show up in the Unity Pro Profiler.
 ASTAR_LARGER_GRIDS                   ; Enables grid graphs larger than 1024x1024. This is not recommended for most users since such large grid graphs use a lot of memory and can be quite slow.
-ASTAR_MORE_MULTI_TARGET_PATH_TARGETS ; Allows you to use more targets for multi-target paths. Enabling this allows up to around 4096 targets, while otherwise up to around 256 targets is allowed. This has a slight memory cost.

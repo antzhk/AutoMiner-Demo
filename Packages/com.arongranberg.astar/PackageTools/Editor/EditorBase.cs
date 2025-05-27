@@ -38,6 +38,12 @@ namespace Pathfinding {
 
 
 		static string LookupPath (System.Type type, string path, Dictionary<string, string> lookupData) {
+			// Common case for backing fields of properties
+			if (path.EndsWith("Backing")) {
+				var basePath = LookupPath(type, path.Substring(0, path.Length - "Backing".Length), lookupData);
+				if (basePath != null) return basePath;
+			}
+
 			// Find the correct type if the path was not an immediate member of #type
 			while (true) {
 				var index = path.IndexOf('.');
@@ -242,11 +248,28 @@ namespace Pathfinding {
 			r = EditorGUI.PrefixLabel(r, EditorGUI.BeginProperty(r, content, prop));
 			var tmpIndent = EditorGUI.indentLevel;
 			EditorGUI.indentLevel = 0;
-			int newVal = EditorGUI.Popup(r, prop.propertyType == SerializedPropertyType.Enum ? prop.enumValueIndex : prop.intValue, options);
+			int indexValue;
+			if (prop.propertyType == SerializedPropertyType.Enum) {
+				indexValue = prop.enumValueIndex;
+			} else if (prop.propertyType == SerializedPropertyType.Integer) {
+				indexValue = prop.intValue;
+			} else if (prop.propertyType == SerializedPropertyType.Boolean) {
+				indexValue = prop.boolValue ? 1 : 0;
+			} else {
+				throw new System.ArgumentException("Property is not an enum, integer or boolean");
+			}
+			indexValue = EditorGUI.Popup(r, indexValue, options);
 			EditorGUI.indentLevel = tmpIndent;
 			if (EditorGUI.EndChangeCheck()) {
-				if (prop.propertyType == SerializedPropertyType.Enum) prop.enumValueIndex = newVal;
-				else prop.intValue = newVal;
+				if (prop.propertyType == SerializedPropertyType.Enum) {
+					prop.enumValueIndex = indexValue;
+				} else if (prop.propertyType == SerializedPropertyType.Integer) {
+					prop.intValue = indexValue;
+				} else if (prop.propertyType == SerializedPropertyType.Boolean) {
+					prop.boolValue = indexValue != 0;
+				} else {
+					throw new System.ArgumentException("Property is not an enum, integer or boolean");
+				}
 			}
 			EditorGUI.EndProperty();
 		}

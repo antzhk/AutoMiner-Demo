@@ -2,7 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 
 	/// <summary>
 	/// Contains utility methods for getting useful information out of graph.
@@ -44,8 +44,8 @@ namespace Pathfinding {
 		public static List<Vector3> GetContours (NavGraph graph) {
 			List<Vector3> result = ListPool<Vector3>.Claim();
 
-			if (graph is INavmesh) {
-				GetContours(graph as INavmesh, (vertices, cycle) => {
+			if (graph is NavmeshBase navmesh) {
+				GetContours(navmesh, (vertices, cycle) => {
 					for (int j = cycle ? vertices.Count - 1 : 0, i = 0; i < vertices.Count; j = i, i++) {
 						result.Add((Vector3)vertices[j]);
 						result.Add((Vector3)vertices[i]);
@@ -76,7 +76,7 @@ namespace Pathfinding {
 		/// </summary>
 		/// <param name="navmesh">The navmesh-like object to trace. This can be a recast or navmesh graph or it could be a single tile in one such graph.</param>
 		/// <param name="results">Will be called once for each contour with the contour as a parameter as well as a boolean indicating if the contour is a cycle or a chain (see second image).</param>
-		public static void GetContours (INavmesh navmesh, System.Action<List<Int3>, bool> results) {
+		public static void GetContours (NavmeshBase navmesh, System.Action<List<Int3>, bool> results) {
 			// Assume 3 vertices per node
 			var uses = new bool[3];
 

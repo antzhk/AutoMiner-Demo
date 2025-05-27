@@ -1,6 +1,7 @@
 using Pathfinding.Jobs;
 using Pathfinding.Util;
 using Pathfinding.Graphs.Navmesh.Voxelization.Burst;
+using Pathfinding.Collections;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -252,11 +253,6 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 
 				unsafe {
 					TileMesh.TileMeshUnsafe* outputTileMesh = outputMeshes + i;
-					*outputTileMesh = new TileMesh.TileMeshUnsafe {
-						verticesInTileSpace = new UnsafeAppendBuffer(0, 4, Allocator.Persistent),
-						triangles = new UnsafeAppendBuffer(0, 4, Allocator.Persistent),
-						tags = new UnsafeAppendBuffer(0, 4, Allocator.Persistent),
-					};
 
 					MarkerConvertAreasToTags.Begin();
 					new JobConvertAreasToTags {
@@ -266,21 +262,25 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 
 					MarkerRemoveDuplicateVertices.Begin();
 					new MeshUtility.JobRemoveDuplicateVertices {
-						vertices = tileBuilder.voxelMesh.verts.AsArray(),
-						triangles = tileBuilder.voxelMesh.tris.AsArray(),
-						tags = tileBuilder.voxelMesh.areas.AsArray(),
-						outputTags = &outputTileMesh->tags,
-						outputVertices = &outputTileMesh->verticesInTileSpace,
-						outputTriangles = &outputTileMesh->triangles,
+						vertices = tileBuilder.voxelMesh.verts,
+						triangles = tileBuilder.voxelMesh.tris,
+						tags = tileBuilder.voxelMesh.areas,
 					}.Execute();
 					MarkerRemoveDuplicateVertices.End();
 
 					MarkerTransformTileCoordinates.Begin();
 					new JobTransformTileCoordinates {
-						vertices = &outputTileMesh->verticesInTileSpace,
+						vertices = tileBuilder.voxelMesh.verts.AsUnsafeSpan(),
 						matrix = voxelToTileSpace,
 					}.Execute();
 					MarkerTransformTileCoordinates.End();
+
+					*outputTileMesh = new TileMesh.TileMeshUnsafe {
+						// Convert the buffers to spans that own their memory.
+						verticesInTileSpace = tileBuilder.voxelMesh.verts.AsUnsafeSpan().Clone(Allocator.Persistent),
+						triangles = tileBuilder.voxelMesh.tris.AsUnsafeSpan().Clone(Allocator.Persistent),
+						tags = tileBuilder.voxelMesh.areas.AsUnsafeSpan().Reinterpret<uint>().Clone(Allocator.Persistent),
+					};
 				}
 			}
 		}

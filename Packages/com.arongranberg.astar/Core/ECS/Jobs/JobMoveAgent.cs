@@ -6,6 +6,8 @@ using Unity.Transforms;
 
 namespace Pathfinding.ECS {
 	[BurstCompile]
+	[WithAll(typeof(SimulateMovement), typeof(SimulateMovementFinalize))]
+	[WithNone(typeof(AgentOffMeshLinkMovementDisabled))]
 	public partial struct JobMoveAgent : IJobEntity {
 		public float dt;
 
@@ -85,6 +87,10 @@ namespace Pathfinding.ECS {
 			var delta = MoveWithoutGravity(ref transform, in resolvedMovement, in movementPlane, dt);
 			UnityEngine.Assertions.Assert.IsTrue(math.all(math.isfinite(delta)), "Refusing to set the agent's position to a non-finite vector");
 			transform.Position += delta;
+			// In 2D games, the agent may move slightly in the Z direction, due to floating point errors.
+			// Some users get confused about this, so if the Z coordinate is very close to zero, just set it to zero.
+			if (math.abs(transform.Position.z) < 0.00001f) transform.Position.z = 0;
+
 			ResolvePositionSmoothing(delta, ref state, in movementSettings, dt);
 			ResolveRotation(ref transform, ref state, in resolvedMovement, in movementSettings, in movementPlane, dt);
 			UpdateVelocityEstimate(ref transform, ref movementStatistics, dt);

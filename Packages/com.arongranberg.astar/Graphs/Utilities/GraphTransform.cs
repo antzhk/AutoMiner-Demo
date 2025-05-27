@@ -1,5 +1,7 @@
 using Unity.Mathematics;
 using UnityEngine;
+using Pathfinding.Collections;
+using Pathfinding.Pooling;
 
 namespace Pathfinding.Util {
 	/// <summary>
@@ -120,6 +122,20 @@ namespace Pathfinding.Util {
 
 		public ToPlaneMatrix AsWorldToPlaneMatrix() => new ToPlaneMatrix(this);
 		public ToWorldMatrix AsPlaneToWorldMatrix() => new ToWorldMatrix(this);
+
+		/// <summary>A movement plane that has the given up direction, but is otherwise as similar as possible to this movement plane</summary>
+		public NativeMovementPlane MatchUpDirection (float3 up) {
+			// Calculate a new movement plane that is perpendicular to the surface normal
+			// and is as similar to the previous movement plane as possible.
+			var forward = math.normalizesafe(math.mul(rotation, new float3(0, 0, 1)));
+			up = math.normalizesafe(up);
+			// TODO: This doesn't guarantee an orthogonal basis? forward and up may not be perpendicular
+			return new NativeMovementPlane(new quaternion(new float3x3(
+				math.cross(up, forward),
+				up,
+				forward
+				)));
+		}
 
 		public float ProjectedLength(float3 v) => math.length(ToPlane(v));
 

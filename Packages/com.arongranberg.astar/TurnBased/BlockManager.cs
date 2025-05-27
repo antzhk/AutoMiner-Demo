@@ -2,7 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 
 	/// <summary>
 	/// Manager for blocker scripts such as SingleNodeBlocker.

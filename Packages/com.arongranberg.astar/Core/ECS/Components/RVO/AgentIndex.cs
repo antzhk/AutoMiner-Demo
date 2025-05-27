@@ -1,13 +1,10 @@
-using Pathfinding.RVO;
 #if MODULE_ENTITIES
 using Unity.Entities;
-using Unity.Transforms;
 #endif
-using UnityEngine;
-using Unity.Mathematics;
 
 namespace Pathfinding.ECS.RVO {
 	using Pathfinding.RVO;
+	using Unity.Collections;
 
 	/// <summary>
 	/// Index of an RVO agent in the local avoidance simulation.
@@ -27,32 +24,68 @@ namespace Pathfinding.ECS.RVO {
 		: Unity.Entities.ICleanupComponentData
 #endif
 	{
-		internal const int DeletedBit = 1 << 31;
-		internal const int IndexMask = (1 << 24) - 1;
-		internal const int VersionOffset = 24;
-		internal const int VersionMask = 0b1111_111 << VersionOffset;
+		const int DeletedBit = 1 << 31;
+		const int IndexMask = (1 << 24) - 1;
+		const int VersionOffset = 24;
+		const int VersionMask = 0b1111_111 << VersionOffset;
 
-		public readonly int packedAgentIndex;
-		public int Index => packedAgentIndex & IndexMask;
-		public int Version => packedAgentIndex & VersionMask;
-		public bool Valid => (packedAgentIndex & DeletedBit) == 0;
+		readonly int packedAgentIndex;
 
-		public AgentIndex(int packedAgentIndex) {
+		/// <summary>
+		/// Index of the agent in the simulation's data arrays.
+		///
+		/// See: <see cref="TryGetIndex"/>
+		/// </summary>
+		internal int Index => packedAgentIndex & IndexMask;
+		int Version => packedAgentIndex & VersionMask;
+		internal bool Valid => (packedAgentIndex & DeletedBit) == 0;
+
+		internal AgentIndex(int packedAgentIndex) {
 			this.packedAgentIndex = packedAgentIndex;
 		}
 
-		public AgentIndex(int version, int index) {
+		internal AgentIndex(int version, int index) {
 			version <<= VersionOffset;
 			UnityEngine.Assertions.Assert.IsTrue((index & IndexMask) == index);
 			packedAgentIndex = (version & VersionMask) | (index & IndexMask);
 		}
 
-		public AgentIndex WithIncrementedVersion () {
+		internal readonly AgentIndex WithIncrementedVersion () {
 			return new AgentIndex((((packedAgentIndex & VersionMask) + (1 << VersionOffset)) & VersionMask) | Index);
 		}
 
-		public AgentIndex WithDeleted () {
+		internal readonly AgentIndex WithDeleted () {
 			return new AgentIndex(packedAgentIndex | DeletedBit);
+		}
+
+		/// <summary>True if the agent exists in the simulation</summary>
+		public readonly bool Exists (ref SimulatorBurst.AgentData agentData) {
+			return TryGetIndex(ref agentData, out _);
+		}
+
+		/// <summary>
+		/// Returns the index of the agent in the simulation's data arrays, if the agent exists.
+		///
+		/// If the agent does not exist, the index will be set to -1 and the method returns false.
+		/// </summary>
+		public readonly bool TryGetIndex (ref SimulatorBurst.AgentData agentData, out int index) {
+			return TryGetIndex(ref agentData.version, out index);
+		}
+
+		/// <summary>
+		/// Returns the index of the agent in the simulation's data arrays, if the agent exists.
+		///
+		/// If the agent does not exist, the index will be set to -1 and the method returns false.
+		/// </summary>
+		public readonly bool TryGetIndex (ref NativeArray<AgentIndex> agentDataVersions, out int index) {
+			var tmpIndex = Index;
+			index = -1;
+			if (!agentDataVersions.IsCreated) return false;
+			if (tmpIndex >= agentDataVersions.Length) return false;
+			if (agentDataVersions[tmpIndex].Version != Version) return false;
+
+			index = tmpIndex;
+			return true;
 		}
 	}
 }

@@ -50,7 +50,7 @@ namespace Pathfinding.PID {
 		/// The agent may want to rotate faster than <see cref="rotationSpeed"/> if there's not enough space, so that it has to move in a more narrow arc.
 		/// It may also want to rotate faster if it is very close to its destination and it wants to make sure it ends up on the right spot without any circling.
 		///
-		/// It is recommended to keep this at a value slightly greater than <see cref="rotationSpeed"/>.
+		/// It is recommended to keep this at a value slightly larger than <see cref="rotationSpeed"/>.
 		///
 		/// See: <see cref="rotationSpeed"/>
 		/// </summary>
@@ -71,7 +71,7 @@ namespace Pathfinding.PID {
 		public float slowdownTime;
 
 		/// <summary>
-		/// Time for the agent to slow down to a complete stop when it decides to change direction by turning on the spot
+		/// Time for the agent to slow down to a complete stop when rotating on the spot.
 		///
 		/// If set to zero, the agent will instantly stop and start to turn around.
 		///
@@ -109,7 +109,12 @@ namespace Pathfinding.PID {
 		/// </summary>
 		public float leadInRadiusWhenApproachingDestination;
 
-		/// <summary>If rotation on the spot is allowed or not</summary>
+		/// <summary>
+		/// If rotation on the spot is allowed or not.
+		///
+		/// When the agent wants to turn significantly, enabling this will make it turn on the spot instead of moving in an arc.
+		/// This can make for more responsive and natural movement for humanoid characters.
+		/// </summary>
 		public bool allowRotatingOnSpot {
 			get => allowRotatingOnSpotBacking != 0;
 			set => allowRotatingOnSpotBacking = (byte)(value ? 1 : 0);
@@ -409,7 +414,7 @@ namespace Pathfinding.PID {
 			buffer.AddNoResize(e2);
 		}
 
-		struct EdgeBuffers {
+		private struct EdgeBuffers {
 			public FixedList512Bytes<float2> triangleRegionEdgesL;
 			public FixedList512Bytes<float2> triangleRegionEdgesR;
 			public FixedList512Bytes<float2> straightRegionEdgesL;

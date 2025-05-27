@@ -21,7 +21,7 @@ namespace Pathfinding.Graphs.Navmesh {
 	///     TileMeshes tiles = result.tileMeshes.ToManaged();
 	///     // Take the scanned tiles and place them in the graph,
 	///     // but not at their original location, but 2 tiles away, rotated 90 degrees.
-	///     tiles.tileRect = tiles.tileRect.Offset(new Int2(2, 0));
+	///     tiles.tileRect = tiles.tileRect.Offset(new Vector2Int(2, 0));
 	///     tiles.Rotate(1);
 	///     graph.ReplaceTiles(tiles);
 	///
@@ -182,11 +182,11 @@ namespace Pathfinding.Graphs.Navmesh {
 			};
 		}
 
-		public void Dispose () {
+		public void Dispose (Allocator allocator) {
 			// Allows calling Dispose on zero-initialized instances
 			if (!tileMeshes.IsCreated) return;
 
-			for (int i = 0; i < tileMeshes.Length; i++) tileMeshes[i].Dispose();
+			for (int i = 0; i < tileMeshes.Length; i++) tileMeshes[i].Dispose(allocator);
 			tileMeshes.Dispose();
 		}
 	}

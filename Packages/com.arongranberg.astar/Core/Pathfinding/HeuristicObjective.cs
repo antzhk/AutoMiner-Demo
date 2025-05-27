@@ -2,6 +2,7 @@ using Unity.Mathematics;
 using Unity.Burst;
 using Pathfinding.Util;
 using Pathfinding.Graphs.Util;
+using Pathfinding.Collections;
 
 namespace Pathfinding {
 	/// <summary>
@@ -18,6 +19,8 @@ namespace Pathfinding {
 		readonly UnsafeSpan<uint> euclideanEmbeddingCosts;
 		readonly uint euclideanEmbeddingPivots;
 		readonly uint targetNodeIndex;
+
+		public bool hasHeuristic => heuristic != Heuristic.None;
 
 		public HeuristicObjective (int3 point, Heuristic heuristic, float heuristicScale) {
 			this.mn = this.mx = point;

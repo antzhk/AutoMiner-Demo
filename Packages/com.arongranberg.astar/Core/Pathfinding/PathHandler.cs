@@ -3,7 +3,54 @@ using Unity.Collections;
 using UnityEngine;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Collections;
+	using Unity.Profiling;
+
+	/// <summary>
+	/// NNConstraint which also takes an <see cref="ITraversalProvider"/> into account.
+	///
+	/// Paths will automatically use this if an ITraversalProvider is set on the path.
+	/// </summary>
+	public class NNConstraintWithTraversalProvider : NNConstraint {
+		public ITraversalProvider traversalProvider;
+		public NNConstraint baseConstraint;
+		public Path path;
+
+		public void Reset () {
+			traversalProvider = null;
+			baseConstraint = null;
+			path = null;
+		}
+
+		public bool isSet => traversalProvider != null;
+
+		public void Set (Path path, NNConstraint constraint, ITraversalProvider traversalProvider) {
+			this.path = path;
+			this.traversalProvider = traversalProvider;
+			// Note: We need to pass most requests to the base constraint, because it may be a subclass of NNConstraint and have additional logic
+			baseConstraint = constraint;
+			// We also need to copy some fields to this instance, because
+			// some fields are used directly. Primarily distanceMetric and constrainDistance,
+			// but we copy all of them for good measure.
+			this.graphMask = constraint.graphMask;
+			this.constrainArea = constraint.constrainArea;
+			this.area = constraint.area;
+			this.distanceMetric = constraint.distanceMetric;
+			this.constrainWalkability = constraint.constrainWalkability;
+			this.walkable = constraint.walkable;
+			this.constrainTags = constraint.constrainTags;
+			this.tags = constraint.tags;
+			this.constrainDistance = constraint.constrainDistance;
+		}
+
+		public override bool SuitableGraph (int graphIndex, NavGraph graph) {
+			return baseConstraint.SuitableGraph(graphIndex, graph);
+		}
+
+		public override bool Suitable (GraphNode node) {
+			return baseConstraint.Suitable(node) && traversalProvider.CanTraverse(path, node);
+		}
+	}
 
 	/// <summary>
 	/// Stores temporary node data for a single pathfinding request.
@@ -114,21 +161,24 @@ namespace Pathfinding {
 
 		public readonly int threadID;
 		public readonly int totalThreadCount;
+		public readonly NNConstraintWithTraversalProvider constraintWrapper = new NNConstraintWithTraversalProvider();
 		internal readonly GlobalNodeStorage nodeStorage;
-		public int numTemporaryNodes { get; private set; }
+		public int numTemporaryNodes { [IgnoredByDeepProfiler] get; private set; }
 
 		/// <summary>
 		/// All path nodes with an index greater or equal to this are temporary nodes that only exist for the duration of a single path.
 		///
 		/// This is a copy of NodeStorage.nextNodeIndex. This is used to avoid having to access the NodeStorage while pathfinding as it's an extra indirection.
 		/// </summary>
-		public uint temporaryNodeStartIndex { get; private set; }
+		public uint temporaryNodeStartIndex { [IgnoredByDeepProfiler] get; private set; }
 		UnsafeSpan<TemporaryNode> temporaryNodes;
 
 		/// <summary>
 		/// Reference to the per-node data for this thread.
 		///
 		/// Note: Only guaranteed to point to a valid allocation while the path is being calculated.
+		///
+		/// Be careful when storing copies of this array, as it may be re-allocated by the AddTemporaryNode method.
 		/// </summary>
 		public UnsafeSpan<PathNode> pathNodes;
 #if UNITY_EDITOR
@@ -154,16 +204,29 @@ namespace Pathfinding {
 			this.threadID = threadID;
 			this.totalThreadCount = totalThreadCount;
 			this.nodeStorage = nodeStorage;
-			temporaryNodes = new UnsafeSpan<TemporaryNode>(Allocator.Persistent, GlobalNodeStorage.MaxTemporaryNodes);
+			temporaryNodes = default;
 		}
 
 		public void InitializeForPath (Path p) {
 			var lastPathId = pathID;
 			pathID = p.pathID;
 			numTemporaryNodes = 0;
-			temporaryNodeStartIndex = nodeStorage.nextNodeIndex;
 			// Get the path nodes for this thread (may have been resized since last we calculated a path)
 			pathNodes = nodeStorage.pathfindingThreadData[threadID].pathNodes;
+
+			// The index at which temporary nodes start. The GlobalNodeStorage allocates some extra path nodes
+			// for use as temporary nodes. This is usually a small number, as they are only needed for the start/end points,
+			// and for off-mesh links (in some cases).
+			// We could hypothetically start already at nodeStorage.nextNodeIndex, but this could lead to us
+			// allocating an unnecessarily large array for the #temporaryNodes array, which would be a waste of memory.
+			temporaryNodeStartIndex = nodeStorage.reservedPathNodeData;
+			// The number of temporary nodes we are allowed to use during this path calculation.
+			// Note: This value will never shrink between path calculations, because the GlobalNodeStorage will never
+			// reduce the number of temporary nodes it reserves.
+			var tempNodeCount = pathNodes.Length - (int)temporaryNodeStartIndex;
+			if (tempNodeCount > temporaryNodes.Length) {
+				temporaryNodes = temporaryNodes.Reallocate(Allocator.Persistent, tempNodeCount);
+			}
 
 #if UNITY_EDITOR
 			var astar = AstarPath.active;
@@ -185,18 +248,25 @@ namespace Pathfinding {
 		/// The PathNode is specific to this PathHandler since multiple PathHandlers
 		/// are used at the same time if multithreading is enabled.
 		/// </summary>
-		public ref PathNode GetPathNode (GraphNode node, uint variant = 0) {
-			return ref pathNodes[node.NodeIndex + variant];
+		public PathNode GetPathNode (GraphNode node, uint variant = 0) {
+			return pathNodes[node.NodeIndex + variant];
 		}
 
 		public bool IsTemporaryNode(uint pathNodeIndex) => pathNodeIndex >= temporaryNodeStartIndex;
 
+		/// <summary>
+		/// Add a new temporary node for this path request.
+		///
+		/// Warning: This may invalidate all memory references to path nodes in this path.
+		/// </summary>
 		public uint AddTemporaryNode (TemporaryNode node) {
-			if (numTemporaryNodes >= GlobalNodeStorage.MaxTemporaryNodes) {
-				// It would be nice if we could dynamically re-allocate the temporaryNodes array, and the pathNodes array. But this class allows handing out references to path nodes and temporary nodes,
-				// and we cannot guarantee that those references will not be used after this function is called (which may lead to memory corruption).
-				// So instead we just have a hard limit, which can be increased by enabling the ASTAR_MORE_MULTI_TARGET_PATH_TARGETS define.
-				throw new System.InvalidOperationException("Cannot create more than " + GlobalNodeStorage.MaxTemporaryNodes + " temporary nodes. You can enable ASTAR_MORE_MULTI_TARGET_PATH_TARGETS in the A* Inspector optimizations tab to increase this limit.");
+			if (numTemporaryNodes >= temporaryNodes.Length) {
+				// Reallocate the node storage to fit more temporary nodes
+				// This will invalidate all references to path nodes and temporary nodes,
+				// so we must ensure that no `ref` variables life across this call.
+				nodeStorage.GrowTemporaryNodeStorage(threadID);
+				pathNodes = nodeStorage.pathfindingThreadData[threadID].pathNodes;
+				temporaryNodes = temporaryNodes.Reallocate(Allocator.Persistent, pathNodes.Length - (int)temporaryNodeStartIndex);
 			}
 
 			var index = temporaryNodeStartIndex + (uint)numTemporaryNodes;

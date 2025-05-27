@@ -214,8 +214,8 @@ namespace Pathfinding {
 
 			if (connectedNode2 == null || connectedNode1 == null) return;
 
-			startNode.SetPosition((Int3)StartTransform.position);
-			endNode.SetPosition((Int3)EndTransform.position);
+			startNode.position = (Int3)StartTransform.position;
+			endNode.position = (Int3)EndTransform.position;
 
 			if (same && !forceNewCheck) return;
 

@@ -1,5 +1,6 @@
-using Pathfinding.Util;
+using Pathfinding.Collections;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -15,6 +16,11 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 	/// - If <see cref="recalculateNormals"/> is enabled: ensure all triangles are laid out in the clockwise direction.
 	/// </summary>
 	public struct JobCreateTiles : IJob {
+		/// <summary>An array of <see cref="TileMesh.TileMeshUnsafe"/> of length tileRect.Width*tileRect.Height, or an uninitialized array</summary>
+		[ReadOnly]
+		[NativeDisableContainerSafetyRestriction]
+		public NativeArray<TileMesh.TileMeshUnsafe> preCutTileMeshes;
+
 		/// <summary>An array of <see cref="TileMesh.TileMeshUnsafe"/> of length tileRect.Width*tileRect.Height</summary>
 		[ReadOnly]
 		public NativeArray<TileMesh.TileMeshUnsafe> tileMeshes;
@@ -35,7 +41,7 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 		/// For example if a graph update is performed, the <see cref="tileRect"/> will just cover the tiles that are recalculated,
 		/// while <see cref="graphTileCount"/> will contain all tiles in the graph.
 		/// </summary>
-		public Int2 graphTileCount;
+		public Vector2Int graphTileCount;
 
 		/// <summary>
 		/// Rectangle of tiles that we are processing.
@@ -63,12 +69,18 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 		public void Execute () {
 			var tiles = (NavmeshTile[])this.tiles.Target;
 			Assert.AreEqual(tileMeshes.Length, tiles.Length);
-			Assert.AreEqual(tileRect.Area, tileMeshes.Length);
+			Assert.AreEqual(tileMeshes.Length, tileRect.Area);
 			Assert.IsTrue(tileRect.xmax < graphTileCount.x);
 			Assert.IsTrue(tileRect.ymax < graphTileCount.y);
 
 			var tileRectWidth = tileRect.Width;
 			var tileRectDepth = tileRect.Height;
+
+			bool isUsingCuts = preCutTileMeshes.IsCreated;
+			if (isUsingCuts) {
+				Assert.AreEqual(preCutTileMeshes.Length, tiles.Length);
+				Assert.AreEqual(preCutTileMeshes.Length, tileRect.Area);
+			}
 
 			for (int z = 0; z < tileRectDepth; z++) {
 				for (int x = 0; x < tileRectWidth; x++) {
@@ -78,7 +90,7 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 					var mesh = tileMeshes[tileIndex];
 
 					// Convert tile space to graph space and world space
-					var verticesInGraphSpace = mesh.verticesInTileSpace.AsUnsafeSpan<Int3>().Clone(Allocator.Persistent);
+					var verticesInGraphSpace = mesh.verticesInTileSpace.Clone(Allocator.Persistent);
 					var verticesInWorldSpace = verticesInGraphSpace.Clone(Allocator.Persistent);
 					var tileSpaceToGraphSpaceOffset = (Int3) new Vector3(tileWorldSize.x * (x + tileRect.xmin), 0, tileWorldSize.y * (z + tileRect.ymin));
 					for (int i = 0; i < verticesInGraphSpace.Length; i++) {
@@ -88,7 +100,7 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 					}
 
 					// Create a new navmesh tile and assign its settings
-					var triangles = mesh.triangles.AsUnsafeSpan<int>().Clone(Allocator.Persistent);
+					var triangles = mesh.triangles.Clone(Allocator.Persistent);
 					var tile = new NavmeshTile {
 						x = x + tileRect.xmin,
 						z = z + tileRect.ymin,
@@ -101,10 +113,23 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 						nodes = new TriangleMeshNode[triangles.Length/3],
 						// Leave empty for now, it will be filled in later
 						graph = null,
+						isCut = false,
 					};
 
+					if (isUsingCuts) {
+						// Copy pre-cut data to be able to reference it when re-cutting the tile.
+						// If no cuts are used, we don't save the pre-cut data, to reduce memory usage,
+						// as it is identical to the post-cut data.
+						// These arrays can be re-created from the other tile data, if needed.
+						var preCutMesh = preCutTileMeshes[tileIndex];
+						tile.preCutVertsInTileSpace = preCutMesh.verticesInTileSpace.Clone(Allocator.Persistent);
+						tile.preCutTris = preCutMesh.triangles.Clone(Allocator.Persistent);
+						tile.preCutTags = preCutMesh.tags.Clone(Allocator.Persistent);
+						tile.isCut = true;
+					}
+
 					Profiler.BeginSample("CreateNodes");
-					NavmeshBase.CreateNodes(tile, tile.tris, graphTileIndex, graphIndex, mesh.tags.AsUnsafeSpan<uint>(), false, null, initialPenalty, false);
+					NavmeshBase.CreateNodes(tile, tile.tris, graphTileIndex, graphIndex, mesh.tags, false, null, initialPenalty, false);
 					Profiler.EndSample();
 
 					tiles[tileIndex] = tile;

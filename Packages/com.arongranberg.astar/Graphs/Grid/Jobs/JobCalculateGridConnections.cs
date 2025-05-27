@@ -1,13 +1,10 @@
 using UnityEngine;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Collections.LowLevel.Unsafe;
-using Unity.Jobs;
 using Unity.Mathematics;
 using Pathfinding.Jobs;
 using Pathfinding.Util;
-using System.Data;
-using UnityEngine.Assertions;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Grid.Jobs {
 	/// <summary>
@@ -20,15 +17,14 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 	[BurstCompile(FloatMode = FloatMode.Fast, CompileSynchronously = true)]
 	public struct JobCalculateGridConnections : IJobParallelForBatched {
 		public float maxStepHeight;
-		/// <summary>Normalized up direction</summary>
-		public Vector3 up;
+		public float4x4 graphToWorld;
 		public IntBounds bounds;
 		public int3 arrayBounds;
 		public NumNeighbours neighbours;
+		public float characterHeight;
 		public bool use2D;
 		public bool cutCorners;
 		public bool maxStepUsesSlope;
-		public float characterHeight;
 		public bool layeredDataLayout;
 
 		[ReadOnly]
@@ -46,45 +42,82 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 
 		public bool allowBoundsChecks => false;
 
+		public static bool IsValidConnection (float y, float y2, float maxStepHeight) {
+			return math.abs(y - y2) <= maxStepHeight;
+		}
 
-		/// <summary>
-		/// Check if a connection to node B is valid.
-		/// Node A is assumed to be walkable already
-		/// </summary>
-		public static bool IsValidConnection (float4 nodePosA, float4 nodeNormalA, bool nodeWalkableB, float4 nodePosB, float4 nodeNormalB, bool maxStepUsesSlope, float maxStepHeight, float4 up) {
-			if (!nodeWalkableB) return false;
+		public static bool IsValidConnection (float2 yRange, float2 yRange2, float maxStepHeight, float characterHeight) {
+			if (!IsValidConnection(yRange.x, yRange2.x, maxStepHeight)) return false;
 
-			if (!maxStepUsesSlope) {
-				// Check their differences along the Y coordinate (well, the up direction really. It is not necessarily the Y axis).
-				return math.abs(math.dot(up, nodePosB - nodePosA)) <= maxStepHeight;
+			// Find the overlap between the two spans to check if the character could pass through the vertical gap
+			float bottom = math.max(yRange.x, yRange2.x);
+			float top = math.min(yRange.y, yRange2.y);
+			return top-bottom >= characterHeight;
+		}
+
+		static float ConnectionY (UnsafeSpan<float3> nodePositions, UnsafeSpan<float4> nodeNormals, NativeArray<float4> normalToHeightOffset, int nodeIndex, int dir, float4 up, bool reverse) {
+			Unity.Burst.CompilerServices.Hint.Assume(nodeIndex >= 0 && nodeIndex < nodePositions.length);
+			Unity.Burst.CompilerServices.Hint.Assume(nodeIndex >= 0 && nodeIndex < nodeNormals.length);
+			Unity.Burst.CompilerServices.Hint.Assume(dir >= 0 && dir < normalToHeightOffset.Length);
+			float4 pos = new float4(nodePositions[(uint)nodeIndex], 0);
+			return math.dot(up, pos) + (reverse ? -1 : 1) * math.dot(nodeNormals[nodeIndex], normalToHeightOffset[dir]);
+		}
+
+		static float2 ConnectionYRange (UnsafeSpan<float3> nodePositions, UnsafeSpan<float4> nodeNormals, NativeArray<float4> normalToHeightOffset, int nodeIndex, int layerStride, int y, int maxY, int dir, float4 up, bool reverse) {
+			var floor = ConnectionY(nodePositions, nodeNormals, normalToHeightOffset, nodeIndex, dir, up, reverse);
+
+			float ceiling;
+			var aboveNodeIndex = nodeIndex + layerStride;
+			if ((uint)aboveNodeIndex < nodeNormals.length && math.any(nodeNormals[(uint)aboveNodeIndex])) {
+				ceiling = ConnectionY(nodePositions, nodeNormals, normalToHeightOffset, aboveNodeIndex, dir, up, reverse);
 			} else {
-				float4 v = nodePosB - nodePosA;
-				float heightDifference = math.dot(v, up);
-
-				// Check if the step is small enough.
-				// This is a fast path for the common case.
-				if (math.abs(heightDifference) <= maxStepHeight) return true;
-
-				float4 v_flat = (v - heightDifference * up) * 0.5f;
-
-				// Math!
-				// Calculates the approximate offset along the up direction
-				// that the ground will have moved at the midpoint between the
-				// nodes compared to the nodes' center points.
-				float NDotU = math.dot(nodeNormalA, up);
-				float offsetA = -math.dot(nodeNormalA - NDotU * up, v_flat);
-
-				NDotU = math.dot(nodeNormalB, up);
-				float offsetB = math.dot(nodeNormalB - NDotU * up, v_flat);
-
-				// Check the height difference with slopes taken into account.
-				// Note that since we also do the heightDifference check above we will ensure slope offsets do not increase the height difference.
-				// If we allowed this then some connections might not be valid near the start of steep slopes.
-				return math.abs(heightDifference + offsetB - offsetA) <= maxStepHeight;
+				ceiling = float.PositiveInfinity;
 			}
+			return new float2(floor, ceiling);
+		}
+
+		static NativeArray<float4> HeightOffsetProjections (float4x4 graphToWorldTranform, bool maxStepUsesSlope) {
+			var normalToHeightOffset = new NativeArray<float4>(8, Allocator.Temp, NativeArrayOptions.ClearMemory);
+			if (maxStepUsesSlope) {
+				for (int dir = 0; dir < normalToHeightOffset.Length; dir++) {
+					//
+					//      |\
+					//      | \
+					//    H |  \       1  _ N = Normal
+					//      |   \      _/ α |
+					//      |  α \  _/      |
+					// D<---|-----x ---------
+					//        1/2  \
+					//              \
+					//               .
+					//
+					// Assume we have a node at x viewed from the side, with a surface normal N.
+					// We want to find the height difference (H) between the node, and the point where it touches the adjacent node.
+					//
+					// This can be calculated as
+					// H = tan(α) * 1/2
+					//
+					// We can approximate this for small angles as:
+					// H = tan(α) * 1/2 ≈ sin(α) * 1/2 = N.x * 1/2
+					//
+					// This approximation is also desirable, because it doesn't allow extremely sloped nodes to connect to nodes arbitrarily far up or down.
+					//
+					// To calculate N.x, we need to take into account that the whole graph can be rotated, and it is also in 3D space.
+					// Instead we calculate it as N.x = -N . D (where . is the dot product, and D = flatDir is the direction to the adjacent node along the ground plane).
+					var flatDir = GridGraph.neighbourXOffsets[dir] * graphToWorldTranform.c0.xyz + GridGraph.neighbourZOffsets[dir] * graphToWorldTranform.c2.xyz;
+
+					// Lastly, we create a linear transform that maps any node normal to H for a given direction
+					// dot(normal, normalToHeightOffset[dir]) = H
+					normalToHeightOffset[dir] = -new float4(flatDir, 0) * 0.5f;
+				}
+			}
+			return normalToHeightOffset;
 		}
 
 		public void Execute (int start, int count) {
+			if (nodePositions.Length != nodeNormals.Length) throw new System.Exception("nodePositions and nodeNormals must have the same length");
+			if (nodePositions.Length != nodeWalkable.Length) throw new System.Exception("nodePositions and nodeWalkable must have the same length");
+			if (nodePositions.Length != nodeConnections.Length) throw new System.Exception("nodePositions and nodeConnections must have the same length");
 			if (layeredDataLayout) ExecuteLayered(start, count);
 			else ExecuteFlat(start, count);
 		}
@@ -92,11 +125,12 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 		public void ExecuteFlat (int start, int count) {
 			if (maxStepHeight <= 0 || use2D) maxStepHeight = float.PositiveInfinity;
 
-			float4 up = new float4(this.up.x, this.up.y, this.up.z, 0);
+			float4 up = graphToWorld.c1;
 
 			NativeArray<int> neighbourOffsets = new NativeArray<int>(8, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
 			for (int i = 0; i < 8; i++) neighbourOffsets[i] = GridGraph.neighbourZOffsets[i] * arrayBounds.x + GridGraph.neighbourXOffsets[i];
 			var nodePositions = this.nodePositions.Reinterpret<float3>();
+			var normalToHeightOffset = HeightOffsetProjections(graphToWorld, maxStepUsesSlope);
 
 			// The loop is parallelized over z coordinates
 			start += bounds.min.z;
@@ -124,14 +158,15 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 					if (x == 0) conns &= ~((1 << 3) | (1 << 6) | (1 << 7));
 					if (x == arrayBounds.x - 1) conns &= ~((1 << 1) | (1 << 4) | (1 << 5));
 
-					float4 pos = new float4(nodePositions[nodeIndex], 0);
-					float4 normal = nodeNormals[nodeIndex];
-
-					for (int i = 0; i < 8; i++) {
-						int neighbourIndex = nodeIndex + neighbourOffsets[i];
-						if ((conns & (1 << i)) != 0 && !IsValidConnection(pos, normal, nodeWalkable[neighbourIndex], new float4(nodePositions[neighbourIndex], 0), nodeNormals[neighbourIndex], maxStepUsesSlope, maxStepHeight, up)) {
-							// Enable connection i
-							conns &= ~(1 << i);
+					for (int dir = 0; dir < 8; dir++) {
+						float y = ConnectionY(nodePositions, nodeNormals, normalToHeightOffset, nodeIndex, dir, up, false);
+						int neighbourIndex = nodeIndex + neighbourOffsets[dir];
+						if ((conns & (1 << dir)) != 0) {
+							float y2 = ConnectionY(nodePositions, nodeNormals, normalToHeightOffset, neighbourIndex, dir, up, true);
+							if (!nodeWalkable[neighbourIndex] || !IsValidConnection(y, y2, maxStepHeight)) {
+								// Disable connection
+								conns &= ~(1 << dir);
+							}
 						}
 					}
 
@@ -143,10 +178,12 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 		public void ExecuteLayered (int start, int count) {
 			if (maxStepHeight <= 0 || use2D) maxStepHeight = float.PositiveInfinity;
 
-			float4 up = new float4(this.up.x, this.up.y, this.up.z, 0);
+			float4 up = graphToWorld.c1;
 
 			NativeArray<int> neighbourOffsets = new NativeArray<int>(8, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
 			for (int i = 0; i < 8; i++) neighbourOffsets[i] = GridGraph.neighbourZOffsets[i] * arrayBounds.x + GridGraph.neighbourXOffsets[i];
+			var nodePositions = this.nodePositions.Reinterpret<float3>();
+			var normalToHeightOffset = HeightOffsetProjections(graphToWorld, maxStepUsesSlope);
 
 			var layerStride = arrayBounds.z*arrayBounds.x;
 			start += bounds.min.z;
@@ -158,53 +195,30 @@ namespace Pathfinding.Graphs.Grid.Jobs {
 						ulong conns = 0;
 						int nodeIndexXZ = z * arrayBounds.x + x;
 						int nodeIndex = nodeIndexXZ + y * layerStride;
-						float4 pos = new float4(nodePositions[nodeIndex], 0);
-						float4 normal = nodeNormals[nodeIndex];
 
 						if (nodeWalkable[nodeIndex]) {
-							var ourY = math.dot(up, pos);
+							for (int dir = 0; dir < 8; dir++) {
+								int nx = x + GridGraph.neighbourXOffsets[dir];
+								int nz = z + GridGraph.neighbourZOffsets[dir];
 
-							float ourHeight;
-							if (y == arrayBounds.y-1 || !math.any(nodeNormals[nodeIndex + layerStride])) {
-								ourHeight = float.PositiveInfinity;
-							} else {
-								var nodeAboveNeighbourPos = new float4(nodePositions[nodeIndex + layerStride], 0);
-								ourHeight = math.max(0, math.dot(up, nodeAboveNeighbourPos) - ourY);
-							}
-
-							for (int i = 0; i < 8; i++) {
-								int nx = x + GridGraph.neighbourXOffsets[i];
-								int nz = z + GridGraph.neighbourZOffsets[i];
-
-								// Check if the new position is inside the grid
 								int conn = LevelGridNode.NoConnection;
 								if (nx >= 0 && nz >= 0 && nx < arrayBounds.x && nz < arrayBounds.z) {
-									int neighbourStartIndex = nodeIndexXZ + neighbourOffsets[i];
+									float2 yRange = ConnectionYRange(nodePositions, nodeNormals, normalToHeightOffset, nodeIndex, layerStride, y, arrayBounds.y, dir, up, false);
+
+									int neighbourStartIndex = nodeIndexXZ + neighbourOffsets[dir];
 									for (int y2 = 0; y2 < arrayBounds.y; y2++) {
 										var neighbourIndex = neighbourStartIndex + y2 * layerStride;
-										float4 nodePosB = new float4(nodePositions[neighbourIndex], 0);
-										var neighbourY = math.dot(up, nodePosB);
-										// Is there a node above this one
-										float neighbourHeight;
-										if (y2 == arrayBounds.y-1 || !math.any(nodeNormals[neighbourIndex + layerStride])) {
-											neighbourHeight = float.PositiveInfinity;
-										} else {
-											var nodeAboveNeighbourPos = new float4(nodePositions[neighbourIndex + layerStride], 0);
-											neighbourHeight = math.max(0, math.dot(up, nodeAboveNeighbourPos) - neighbourY);
-										}
+										if (!nodeWalkable[neighbourIndex]) continue;
 
-										float bottom = math.max(neighbourY, ourY);
-										float top = math.min(neighbourY + neighbourHeight, ourY + ourHeight);
-
-										float dist = top-bottom;
-
-										if (dist >= characterHeight && IsValidConnection(pos, normal, nodeWalkable[neighbourIndex], new float4(nodePositions[neighbourIndex], 0), nodeNormals[neighbourIndex], maxStepUsesSlope, maxStepHeight, up)) {
+										float2 yRange2 = ConnectionYRange(nodePositions, nodeNormals, normalToHeightOffset, neighbourIndex, layerStride, y2, arrayBounds.y, dir, up, true);
+										if (IsValidConnection(yRange, yRange2, maxStepHeight, characterHeight)) {
 											conn = y2;
+											break;
 										}
 									}
 								}
 
-								conns |= (ulong)conn << LevelGridNode.ConnectionStride*i;
+								conns |= (ulong)conn << LevelGridNode.ConnectionStride*dir;
 							}
 						} else {
 							conns = LevelGridNode.AllConnectionsMask;

@@ -47,6 +47,22 @@ namespace Pathfinding.Util {
 			}
 		}
 
+		public static int TagField (int value, System.Action editCallback) {
+			FindTagNames();
+			value = Mathf.Clamp(value, 0, GraphNode.MaxTagIndex);
+
+			var newValue = EditorGUILayout.IntPopup(value, tagNamesAndEditTagsButton, tagValues);
+
+			// Last element corresponds to the 'Edit Tags...' entry. Open the tag editor
+			if (newValue == -1) {
+				editCallback();
+			} else {
+				value = newValue;
+			}
+
+			return value;
+		}
+
 		public static int TagField (Rect rect, GUIContent label, int value, System.Action editCallback) {
 			FindTagNames();
 			// Tags are between 0 and GraphNode.MaxTagIndex

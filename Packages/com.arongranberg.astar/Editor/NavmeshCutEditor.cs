@@ -95,6 +95,12 @@ namespace Pathfinding {
 					}
 				}
 			}
+
+#if !UNITY_2022_3_OR_NEWER
+			EditorGUILayout.HelpBox("The NavmeshCut component requires Unity 2022.3 or newer to work, due to Unity bugs in earlier versions. Please update Unity to 2022.3.21 or later, if you want to use navmesh cutting.", MessageType.Error);
+#elif !MODULE_COLLECTIONS_2_2_0_OR_NEWER
+			EditorGUILayout.HelpBox("The NavmeshCut component requires the com.unity.collections package version 2.2.0 or newer. Please install it using the Package Manager.", MessageType.Error);
+#endif
 		}
 	}
 }

@@ -31,13 +31,14 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 			for (int ti = 0; ti < tileMeshes.Length; ti++) {
 				nodeRefs.Clear();
 				var tile = tileMeshes[ti];
-				var numIndices = tile.triangles.Length / sizeof(int);
+				var numIndices = tile.triangles.Length;
 				var neighbours = new Unity.Collections.LowLevel.Unsafe.UnsafeAppendBuffer(numIndices * 2 * 4, 4, Allocator.Persistent);
 				var neighbourCounts = new Unity.Collections.LowLevel.Unsafe.UnsafeAppendBuffer(numIndices * 4, 4, Allocator.Persistent);
 				const int TriangleIndexBits = 28;
 				unsafe {
 					Assert.IsTrue(numIndices % 3 == 0);
-					var triangles = (int*)tile.triangles.Ptr;
+					// Access data via the raw pointer to avoid bounds checks
+					var triangles = tile.triangles.ptr;
 					for (int i = 0, j = 0; i < numIndices; i += 3, j++) {
 						duplicates |= !nodeRefs.TryAdd(new int2(triangles[i+0], triangles[i+1]), (uint)j | (0 << TriangleIndexBits));
 						duplicates |= !nodeRefs.TryAdd(new int2(triangles[i+1], triangles[i+2]), (uint)j | (1 << TriangleIndexBits));

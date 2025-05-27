@@ -1,21 +1,11 @@
+using Pathfinding.Util;
 using Unity.Burst;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Navmesh.Voxelization {
 	/// <summary>Utility for clipping polygons</summary>
 	internal struct Int3PolygonClipper {
-		/// <summary>Cache this buffer to avoid unnecessary allocations</summary>
-		float[] clipPolygonCache;
-
-		/// <summary>Cache this buffer to avoid unnecessary allocations</summary>
-		int[] clipPolygonIntCache;
-
-		/// <summary>Initialize buffers if they are null</summary>
-		public void Init () {
-			if (clipPolygonCache == null) {
-				clipPolygonCache = new float[7*3];
-				clipPolygonIntCache = new int[7*3];
-			}
-		}
+		unsafe fixed float clipPolygonCache[7*3];
 
 		/// <summary>
 		/// Clips a polygon against an axis aligned half plane.
@@ -32,35 +22,34 @@ namespace Pathfinding.Graphs.Navmesh.Voxelization {
 		/// <param name="multi">Scale factor for the input vertices</param>
 		/// <param name="offset">Offset to move the input vertices with before cutting</param>
 		/// <param name="axis">Axis to cut along, either x=0, y=1, z=2</param>
-		public int ClipPolygon (Int3[] vIn, int n, Int3[] vOut, int multi, int offset, int axis) {
-			Init();
-			int[] d = clipPolygonIntCache;
-
-			for (int i = 0; i < n; i++) {
-				d[i] = multi*vIn[i][axis]+offset;
-			}
-
-			// Number of resulting vertices
-			int m = 0;
-
-			for (int i = 0, j = n-1; i < n; j = i, i++) {
-				bool prev = d[j] >= 0;
-				bool curr = d[i] >= 0;
-
-				if (prev != curr) {
-					double s = (double)d[j] / (d[j] - d[i]);
-
-					vOut[m] = vIn[j] + (vIn[i]-vIn[j])*s;
-					m++;
+		public int ClipPolygon (UnsafeSpan<Int3> vIn, int n, UnsafeSpan<Int3> vOut, int multi, int offset, int axis) {
+			unsafe {
+				for (int i = 0; i < n; i++) {
+					clipPolygonCache[i] = multi*vIn[i][axis]+offset;
 				}
 
-				if (curr) {
-					vOut[m] = vIn[i];
-					m++;
-				}
-			}
+				// Number of resulting vertices
+				int m = 0;
 
-			return m;
+				for (int i = 0, j = n-1; i < n; j = i, i++) {
+					bool prev = clipPolygonCache[j] >= 0;
+					bool curr = clipPolygonCache[i] >= 0;
+
+					if (prev != curr) {
+						double s = (double)clipPolygonCache[j] / (clipPolygonCache[j] - clipPolygonCache[i]);
+
+						vOut[m] = vIn[j] + (vIn[i]-vIn[j])*s;
+						m++;
+					}
+
+					if (curr) {
+						vOut[m] = vIn[i];
+						m++;
+					}
+				}
+
+				return m;
+			}
 		}
 	}
 

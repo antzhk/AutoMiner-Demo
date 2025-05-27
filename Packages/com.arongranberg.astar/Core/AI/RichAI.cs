@@ -9,6 +9,7 @@ namespace Pathfinding {
 
 	[AddComponentMenu("Pathfinding/AI/RichAI (3D, for navmesh)")]
 	[UniqueComponent(tag = "ai")]
+	[DisallowMultipleComponent]
 	/// <summary>
 	/// Advanced AI for navmesh based graphs.
 	///

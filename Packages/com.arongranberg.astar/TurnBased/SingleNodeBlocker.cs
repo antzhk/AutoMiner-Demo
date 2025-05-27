@@ -49,6 +49,7 @@ namespace Pathfinding {
 		/// Will unblock the last node that was reserved (if any)
 		/// </summary>
 		public void Block (GraphNode node) {
+			Unblock();
 			if (node == null)
 				throw new System.ArgumentNullException("node");
 

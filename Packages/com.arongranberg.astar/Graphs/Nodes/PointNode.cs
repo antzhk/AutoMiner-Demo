@@ -14,10 +14,13 @@ namespace Pathfinding {
 		/// All connections from this node.
 		/// See: <see cref="Connect"/>
 		/// See: <see cref="Disconnect"/>
+		/// See: <see cref="GetConnections"/>
 		///
 		/// Note: If you modify this array or the contents of it you must call <see cref="SetConnectivityDirty"/>.
 		///
 		/// Note: If you modify this array or the contents of it you must call <see cref="PointGraph.RegisterConnectionLength"/> with the length of the new connections.
+		///
+		/// This may be null if the node has no connections to other nodes.
 		/// </summary>
 		public Connection[] connections;
 
@@ -38,6 +41,7 @@ namespace Pathfinding {
 		/// </summary>
 		public GameObject gameObject;
 
+		[System.Obsolete("Set node.position instead")]
 		public void SetPosition (Int3 value) {
 			position = value;
 		}

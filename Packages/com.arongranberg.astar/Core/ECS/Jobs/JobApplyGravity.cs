@@ -18,19 +18,6 @@ namespace Pathfinding.ECS {
 		public CommandBuilder draw;
 		public float dt;
 
-		public static void UpdateMovementPlaneFromNormal (float3 normal, ref AgentMovementPlane movementPlane) {
-			// Calculate a new movement plane that is perpendicular to the surface normal
-			// and is as similar to the previous movement plane as possible.
-			var forward = math.normalizesafe(math.mul(movementPlane.value.rotation, new float3(0, 0, 1)));
-			normal = math.normalizesafe(normal);
-			// TODO: This doesn't guarantee an orthogonal basis? forward and normal may not be perpendicular
-			movementPlane.value = new NativeMovementPlane(new quaternion(new float3x3(
-				math.cross(normal, forward),
-				normal,
-				forward
-				)));
-		}
-
 		void ResolveGravity (RaycastHit hit, bool grounded, ref LocalTransform transform, in AgentMovementPlane movementPlane, ref GravityState gravityState) {
 			var localPosition = movementPlane.value.ToPlane(transform.Position, out var currentElevation);
 			if (grounded) {
@@ -66,7 +53,7 @@ namespace Pathfinding.ECS {
 			var hit = raycastHits[entityIndexInQuery];
 			var hitAnything = math.any((float3)hit.normal != 0f);
 			if (hitAnything && movementPlaneSource.value == MovementPlaneSource.Raycast) {
-				UpdateMovementPlaneFromNormal(hit.normal, ref movementPlane);
+				movementPlane.value = movementPlane.value.MatchUpDirection(hit.normal);
 			}
 			ResolveGravity(hit, hitAnything, ref transform, in movementPlane, ref gravityState);
 		}

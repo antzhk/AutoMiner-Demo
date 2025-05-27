@@ -4,6 +4,8 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using UnityEngine;
+using Pathfinding.Collections;
+using Pathfinding.Sync;
 
 namespace Pathfinding.Graphs.Navmesh.Jobs {
 	/// <summary>
@@ -30,24 +32,14 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 			public Matrix4x4 matrix;
 
 			public void Execute () {
+				if (vertices.Length != outputVertices.Length) throw new System.ArgumentException("Input and output arrays must have the same length");
 				for (int i = 0; i < vertices.Length; i++) {
 					outputVertices[i] = (Int3)matrix.MultiplyPoint3x4(vertices[i]);
 				}
 			}
 		}
 
-		public struct BuildNavmeshOutput : IProgress, System.IDisposable {
-			public NativeArray<TileMesh.TileMeshUnsafe> tiles;
-
-			public float Progress => 0.0f;
-
-			public void Dispose () {
-				for (int i = 0; i < tiles.Length; i++) tiles[i].Dispose();
-				tiles.Dispose();
-			}
-		}
-
-		public static Promise<BuildNavmeshOutput> Schedule (NativeArray<Vector3> vertices, NativeArray<int> indices, Matrix4x4 meshToGraph, bool recalculateNormals) {
+		public static Promise<TileBuilder.TileBuilderOutput> Schedule (NativeArray<Vector3> vertices, NativeArray<int> indices, Matrix4x4 meshToGraph, bool recalculateNormals) {
 			if (vertices.Length > NavmeshBase.VertexIndexMask) throw new System.ArgumentException("Too many vertices in the navmesh graph. Provided " + vertices.Length + ", but the maximum number of vertices per tile is " + NavmeshBase.VertexIndexMask + ". You can raise this limit by enabling ASTAR_RECAST_LARGER_TILES in the A* Inspector Optimizations tab");
 
 			var outputBuffers = new NativeArray<TileMesh.TileMeshUnsafe>(1, Allocator.Persistent);
@@ -59,43 +51,44 @@ namespace Pathfinding.Graphs.Navmesh.Jobs {
 				outputBuffers = outputBuffers,
 				recalculateNormals = recalculateNormals,
 			}.Schedule();
-			return new Promise<BuildNavmeshOutput>(job, new BuildNavmeshOutput {
-				tiles = outputBuffers,
+			return new Promise<TileBuilder.TileBuilderOutput>(job, new TileBuilder.TileBuilderOutput {
+				// TODO: Tile world size is wrong
+				tileMeshes = new TileMeshesUnsafe(outputBuffers, new IntRect(0, 0, 0, 0), new Vector2(100000, 100000)),
 			});
 		}
 
 		public void Execute () {
-			var int3vertices = new NativeArray<Int3>(vertices.Length, Allocator.Temp);
-			var tags = new NativeArray<int>(indices.Length / 3, Allocator.Temp, NativeArrayOptions.ClearMemory);
+			var int3vertices = new NativeList<Int3>(vertices.Length, Allocator.Temp);
+			int3vertices.Length = vertices.Length;
+			var tags = new NativeList<int>(indices.Length / 3, Allocator.Temp);
+			tags.Length = indices.Length / 3;
+			var triangles = new NativeList<int>(indices.Length, Allocator.Temp);
+			triangles.AddRange(indices);
 
 			new JobTransformTileCoordinates {
 				vertices = vertices,
-				outputVertices = int3vertices,
+				outputVertices = int3vertices.AsArray(),
 				matrix = meshToGraph,
 			}.Execute();
 
 			unsafe {
 				UnityEngine.Assertions.Assert.IsTrue(this.outputBuffers.Length == 1);
 				var tile = (TileMesh.TileMeshUnsafe*) this.outputBuffers.GetUnsafePtr();
-				var outputVertices = &tile->verticesInTileSpace;
-				var outputTriangles = &tile->triangles;
-				var outputTags = &tile->tags;
-				*outputVertices = new UnsafeAppendBuffer(0, 4, Allocator.Persistent);
-				*outputTriangles = new UnsafeAppendBuffer(0, 4, Allocator.Persistent);
-				*outputTags = new UnsafeAppendBuffer(0, 4, Allocator.Persistent);
 				new MeshUtility.JobRemoveDuplicateVertices {
 					vertices = int3vertices,
-					triangles = indices,
+					triangles = triangles,
 					tags = tags,
-					outputVertices = outputVertices,
-					outputTriangles = outputTriangles,
-					outputTags = outputTags,
 				}.Execute();
 
+				// Convert the buffers to spans that own their memory.
+				// The spans may be smaller than the underlaying allocation,
+				// but the whole allocation will be freed using the span's Free method.
+				tile->verticesInTileSpace = int3vertices.AsUnsafeSpan<Int3>().Clone(Allocator.Persistent);
+				tile->triangles = triangles.AsUnsafeSpan<int>().Clone(Allocator.Persistent);
+				tile->tags = tags.AsUnsafeSpan().Reinterpret<uint>().Clone(Allocator.Persistent);
+
 				if (recalculateNormals) {
-					var verticesSpan = outputVertices->AsUnsafeSpan<Int3>();
-					var trianglesSpan = outputTriangles->AsUnsafeSpan<int>();
-					MeshUtility.MakeTrianglesClockwise(ref verticesSpan, ref trianglesSpan);
+					MeshUtility.MakeTrianglesClockwise(ref tile->verticesInTileSpace, ref tile->triangles);
 				}
 			}
 

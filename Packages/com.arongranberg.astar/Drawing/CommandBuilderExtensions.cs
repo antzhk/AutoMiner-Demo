@@ -173,7 +173,7 @@ namespace Pathfinding.Drawing {
 			Circle(position, new float3(0, 0, 1), radius);
 			PopColor();
 		}
-		/// <summary>\copydocref{Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector3>,bool)}</summary>
 		/// <param name="color">Color of the object</param>
 		[BurstDiscard]
 		public void Polyline (List<Vector3> points, bool cycle, Color color) {
@@ -184,7 +184,7 @@ namespace Pathfinding.Drawing {
 			if (cycle && points.Count > 1) Line(points[points.Count - 1], points[0]);
 			PopColor();
 		}
-		/// <summary>\copydocref{Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector3>,bool)}</summary>
 		/// <param name="color">Color of the object</param>
 		[BurstDiscard]
 		public void Polyline (List<Vector3> points, Color color) {
@@ -224,7 +224,7 @@ namespace Pathfinding.Drawing {
 		public void Polyline (float3[] points, Color color) {
 			Polyline(points, false, color);
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float3>,bool)}</summary>
 		/// <param name="color">Color of the object</param>
 		public void Polyline (NativeArray<float3> points, bool cycle, Color color) {
 			PushColor(color);
@@ -234,7 +234,7 @@ namespace Pathfinding.Drawing {
 			if (cycle && points.Length > 1) Line(points[points.Length - 1], points[0]);
 			PopColor();
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float3>,bool)}</summary>
 		/// <param name="color">Color of the object</param>
 		public void Polyline (NativeArray<float3> points, Color color) {
 			Polyline(points, false, color);
@@ -280,7 +280,7 @@ namespace Pathfinding.Drawing {
 #endif
 			PopColor();
 		}
-		/// <summary>\copydocref{WireMesh(NativeArray&lt;float3&gt;,NativeArray&lt;int&gt;)}</summary>
+		/// <summary>\copydocref{WireMesh(NativeArray<float3>,NativeArray<int>)}</summary>
 		public void WireMesh (NativeArray<float3> vertices, NativeArray<int> triangles, Color color) {
 			PushColor(color);
 #if UNITY_2020_1_OR_NEWER

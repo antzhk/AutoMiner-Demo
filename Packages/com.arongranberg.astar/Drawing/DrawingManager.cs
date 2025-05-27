@@ -13,6 +13,7 @@ using UnityEngine.Rendering;
 using Unity.Profiling;
 #if MODULE_RENDER_PIPELINES_UNIVERSAL
 using UnityEngine.Rendering.Universal;
+using UnityEngine.Profiling;
 #endif
 #if MODULE_RENDER_PIPELINES_HIGH_DEFINITION
 using UnityEngine.Rendering.HighDefinition;
@@ -136,8 +137,8 @@ namespace Pathfinding.Drawing {
 	[AddComponentMenu("")]
 	public class DrawingManager : MonoBehaviour {
 		public DrawingData gizmos;
-		static List<IDrawGizmos> gizmoDrawers = new List<IDrawGizmos>();
-		static Dictionary<System.Type, bool> gizmoDrawerTypes = new Dictionary<System.Type, bool>();
+		static List<GizmoDrawerGroup> gizmoDrawers = new List<GizmoDrawerGroup>();
+		static Dictionary<System.Type, int> gizmoDrawerIndices = new Dictionary<System.Type, int>();
 		static DrawingManager _instance;
 		bool framePassed;
 		int lastFrameCount = int.MinValue;
@@ -146,6 +147,13 @@ namespace Pathfinding.Drawing {
 #if UNITY_EDITOR
 		bool builtGizmos;
 #endif
+
+		struct GizmoDrawerGroup {
+			public System.Type type;
+			public ProfilerMarker profilerMarker;
+			public List<IDrawGizmos> drawers;
+			public bool enabled;
+		}
 
 		/// <summary>True if OnEnable has been called on this instance and OnDisable has not</summary>
 		[SerializeField]
@@ -179,6 +187,10 @@ namespace Pathfinding.Drawing {
 
 		[System.NonSerialized]
 		DetectedRenderPipeline detectedRenderPipeline = DetectedRenderPipeline.BuiltInOrCustom;
+
+#if MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER
+		CustomPass hdrpGlobalPass;
+#endif
 
 #if MODULE_RENDER_PIPELINES_UNIVERSAL
 		HashSet<ScriptableRenderer> scriptableRenderersWithPass = new HashSet<ScriptableRenderer>();
@@ -235,12 +247,18 @@ namespace Pathfinding.Drawing {
 			if (pipelineType == typeof(HDRenderPipeline)) {
 				if (detectedRenderPipeline != DetectedRenderPipeline.HDRP) {
 					detectedRenderPipeline = DetectedRenderPipeline.HDRP;
+#if MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER
+					UnityEngine.Assertions.Assert.IsNull(hdrpGlobalPass);
+					hdrpGlobalPass = new AlineHDRPCustomPass();
+					CustomPassVolume.RegisterGlobalCustomPass(CustomPassInjectionPoint.AfterPostProcess, hdrpGlobalPass);
+#else
 					if (!_instance.gameObject.TryGetComponent<CustomPassVolume>(out CustomPassVolume volume)) {
 						volume = _instance.gameObject.AddComponent<CustomPassVolume>();
 						volume.isGlobal = true;
 						volume.injectionPoint = CustomPassInjectionPoint.AfterPostProcess;
 						volume.customPasses.Add(new AlineHDRPCustomPass());
 					}
+#endif
 
 					var asset = GraphicsSettings.defaultRenderPipeline as HDRenderPipelineAsset;
 					if (asset != null) {
@@ -249,9 +267,23 @@ namespace Pathfinding.Drawing {
 						}
 					}
 				}
+
+#if UNITY_ASSERTIONS && MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER
+				var globalPasses = CustomPassVolume.GetGlobalCustomPasses(CustomPassInjectionPoint.AfterPostProcess);
+				bool found = false;
+				for (int i = 0; i < globalPasses.Count; i++) found |= globalPasses[i].instance == hdrpGlobalPass;
+				UnityEngine.Assertions.Assert.IsTrue(found, "Custom pass for gizmos is not registered. Have the custom passes been forcefully removed by another script?");
+#endif
 				return;
 			}
+#if MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER
+			if (hdrpGlobalPass != null) {
+				CustomPassVolume.UnregisterGlobalCustomPass(CustomPassInjectionPoint.AfterPostProcess, hdrpGlobalPass);
+				hdrpGlobalPass = null;
+			}
 #endif
+#endif
+
 #if MODULE_RENDER_PIPELINES_UNIVERSAL
 			if (pipelineType == typeof(UniversalRenderPipeline)) {
 				detectedRenderPipeline = DetectedRenderPipeline.URP;
@@ -298,10 +330,12 @@ namespace Pathfinding.Drawing {
 			commandBuffer = new CommandBuffer();
 			commandBuffer.name = "ALINE Gizmos";
 
+			detectedRenderPipeline = DetectedRenderPipeline.BuiltInOrCustom;
+
 			// Callback when rendering with the built-in render pipeline
 			Camera.onPostRender += PostRender;
 			// Callback when rendering with a scriptable render pipeline
-#if UNITY_2023_3_OR_NEWER
+#if UNITY_2021_1_OR_NEWER
 			UnityEngine.Rendering.RenderPipelineManager.beginContextRendering += BeginContextRendering;
 #else
 			UnityEngine.Rendering.RenderPipelineManager.beginFrameRendering += BeginFrameRendering;
@@ -343,7 +377,7 @@ namespace Pathfinding.Drawing {
 			commandBuffer.Dispose();
 			commandBuffer = null;
 			Camera.onPostRender -= PostRender;
-#if UNITY_2023_3_OR_NEWER
+#if UNITY_2021_1_OR_NEWER
 			UnityEngine.Rendering.RenderPipelineManager.beginContextRendering -= BeginContextRendering;
 #else
 			UnityEngine.Rendering.RenderPipelineManager.beginFrameRendering -= BeginFrameRendering;
@@ -364,6 +398,12 @@ namespace Pathfinding.Drawing {
 			if (renderPassFeature != null) {
 				ScriptableObject.DestroyImmediate(renderPassFeature);
 				renderPassFeature = null;
+			}
+#endif
+#if MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER
+			if (hdrpGlobalPass != null) {
+				CustomPassVolume.UnregisterGlobalCustomPass(CustomPassInjectionPoint.AfterPostProcess, hdrpGlobalPass);
+				hdrpGlobalPass = null;
 			}
 #endif
 		}
@@ -521,8 +561,6 @@ namespace Pathfinding.Drawing {
 		readonly System.Object[] cachedObjectParameterArray = new System.Object[1];
 #endif
 
-		readonly Dictionary<System.Type, bool> typeToGizmosEnabled = new Dictionary<Type, bool>();
-
 		bool ShouldDrawGizmos (UnityEngine.Object obj) {
 #if UNITY_EDITOR
 			// Use reflection to call EditorGUIUtility.IsGizmosAllowedForObject which is an internal method.
@@ -537,15 +575,18 @@ namespace Pathfinding.Drawing {
 
 		static void RemoveDestroyedGizmoDrawers () {
 			MarkerFilterDestroyedObjects.Begin();
-			int j = 0;
 			for (int i = 0; i < gizmoDrawers.Count; i++) {
-				var v = gizmoDrawers[i];
-				if (v as MonoBehaviour) {
-					gizmoDrawers[j] = v;
-					j++;
+				var group = gizmoDrawers[i];
+				int j = 0;
+				for (int k = 0; k < group.drawers.Count; k++) {
+					var v = group.drawers[k];
+					if (v as MonoBehaviour) {
+						group.drawers[j] = v;
+						j++;
+					}
 				}
+				group.drawers.RemoveRange(j, group.drawers.Count - j);
 			}
-			gizmoDrawers.RemoveRange(j, gizmoDrawers.Count - j);
 			MarkerFilterDestroyedObjects.End();
 		}
 
@@ -553,40 +594,37 @@ namespace Pathfinding.Drawing {
 		void DrawGizmos (bool usingRenderPipeline) {
 			GizmoContext.SetDirty();
 			MarkerGizmosAllowed.Begin();
-			typeToGizmosEnabled.Clear();
 
-			// Fill the typeToGizmosEnabled dict with info about which classes should be drawn
+			// Figure out which component types should be rendered
+			for (int i = 0; i < gizmoDrawers.Count; i++) {
+				var group = gizmoDrawers[i];
 #if UNITY_2022_1_OR_NEWER
-			// In Unity 2022.1 we can use a new utility class which is more robust.
-			foreach (var tp in gizmoDrawerTypes) {
-				if (GizmoUtility.TryGetGizmoInfo(tp.Key, out var gizmoInfo)) {
-					typeToGizmosEnabled[tp.Key] = gizmoInfo.gizmoEnabled;
+				// In Unity 2022.1 we can use a new utility class which is more robust.
+				if (GizmoUtility.TryGetGizmoInfo(group.type, out var gizmoInfo)) {
+					group.enabled = gizmoInfo.gizmoEnabled;
 				} else {
-					typeToGizmosEnabled[tp.Key] = true;
+					group.enabled = true;
 				}
-			}
 #else
-			// We take advantage of the fact that IsGizmosAllowedForObject only depends on the type of the object and if it is active and enabled
-			// and not the specific object instance.
-			// When using a render pipeline the ShouldDrawGizmos method cannot be used because it seems to occasionally crash Unity :(
-			// So we need these two separate cases.
-			if (!usingRenderPipeline) {
-				for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
-					var tp = gizmoDrawers[i].GetType();
-					if (!typeToGizmosEnabled.ContainsKey(tp) && (gizmoDrawers[i] as MonoBehaviour).isActiveAndEnabled) {
-						typeToGizmosEnabled[tp] = ShouldDrawGizmos((UnityEngine.Object)gizmoDrawers[i]);
+				// We take advantage of the fact that IsGizmosAllowedForObject only depends on the type of the object and if it is active and enabled
+				// and not the specific object instance.
+				// When using a render pipeline the ShouldDrawGizmos method cannot be used because it seems to occasionally crash Unity :(
+				// So we need these two separate cases.
+				if (!usingRenderPipeline) {
+					group.enabled = false;
+					for (int j = group.drawers.Count - 1; j >= 0; j--) {
+						// Find the first active and enabled drawer
+						if ((group.drawers[j] as MonoBehaviour).isActiveAndEnabled) {
+							group.enabled = ShouldDrawGizmos((UnityEngine.Object)group.drawers[j]);
+							break;
+						}
 					}
+				} else {
+					group.enabled = true;
 				}
-				foreach (var tp in gizmoDrawerTypes) {
-					// Check if there were no enabled objects of that type at all
-					if (!typeToGizmosEnabled.ContainsKey(tp.Key)) typeToGizmosEnabled[tp.Key] = false;
-				}
-			} else {
-				foreach (var tp in gizmoDrawerTypes) {
-					typeToGizmosEnabled[tp.Key] = true;
-				}
-			}
 #endif
+				gizmoDrawers[i] = group;
+			}
 
 			MarkerGizmosAllowed.End();
 
@@ -599,6 +637,7 @@ namespace Pathfinding.Drawing {
 #if UNITY_EDITOR && UNITY_2020_1_OR_NEWER
 			var currentStage = StageUtility.GetCurrentStage();
 			var isInNonMainStage = currentStage != StageUtility.GetMainStage();
+			var currentStageHandle = currentStage.stageHandle;
 #endif
 
 			// This would look nicer as a 'using' block, but built-in command builders
@@ -611,44 +650,28 @@ namespace Pathfinding.Drawing {
 			GizmoContext.drawingGizmos = true;
 			try {
 				Draw.builder = gizmoBuilder;
-				if (usingRenderPipeline) {
-					for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
-						var mono = gizmoDrawers[i] as MonoBehaviour;
-#if UNITY_EDITOR && UNITY_2020_1_OR_NEWER
-						// True if the scene is in isolation mode (e.g. focusing on a single prefab) and this object is not part of that sub-stage
-						var disabledDueToIsolationMode = isInNonMainStage && StageUtility.GetStage(mono.gameObject) != currentStage;
-#else
-						var disabledDueToIsolationMode = false;
-#endif
-#if UNITY_2022_1_OR_NEWER
-						var gizmosEnabled = mono.isActiveAndEnabled && typeToGizmosEnabled[gizmoDrawers[i].GetType()];
-#else
-						var gizmosEnabled = mono.isActiveAndEnabled;
-#endif
-						if (gizmosEnabled && (mono.hideFlags & HideFlags.HideInHierarchy) == 0 && !disabledDueToIsolationMode) {
-							try {
-								gizmoDrawers[i].DrawGizmos();
-							} catch (System.Exception e) {
-								Debug.LogException(e, mono);
-							}
-						}
-					}
-				} else {
-					for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
-						var mono = gizmoDrawers[i] as MonoBehaviour;
-						if (mono.isActiveAndEnabled && (mono.hideFlags & HideFlags.HideInHierarchy) == 0 && typeToGizmosEnabled[gizmoDrawers[i].GetType()]) {
+
+				for (int i = gizmoDrawers.Count - 1; i >= 0; i--) {
+					var group = gizmoDrawers[i];
+					if (group.enabled && group.drawers.Count > 0) {
+						group.profilerMarker.Begin();
+						for (int j = group.drawers.Count - 1; j >= 0; j--) {
+							var mono = group.drawers[j] as MonoBehaviour;
+							if (!mono.isActiveAndEnabled || (mono.hideFlags & HideFlags.HideInHierarchy) != 0) continue;
+
 #if UNITY_EDITOR && UNITY_2020_1_OR_NEWER
 							// True if the scene is in isolation mode (e.g. focusing on a single prefab) and this object is not part of that sub-stage
-							var disabledDueToIsolationMode = isInNonMainStage && StageUtility.GetStage(mono.gameObject) != currentStage;
-#else
-							var disabledDueToIsolationMode = false;
+							var disabledDueToIsolationMode = isInNonMainStage && !currentStageHandle.Contains(mono.gameObject);
+							if (disabledDueToIsolationMode) continue;
 #endif
+
 							try {
-								if (!disabledDueToIsolationMode) gizmoDrawers[i].DrawGizmos();
+								group.drawers[j].DrawGizmos();
 							} catch (System.Exception e) {
 								Debug.LogException(e, mono);
 							}
 						}
+						group.profilerMarker.End();
 					}
 				}
 			} finally {
@@ -699,24 +722,35 @@ namespace Pathfinding.Drawing {
 		public static void Register (IDrawGizmos item) {
 			var tp = item.GetType();
 
-			// Use reflection to figure out if the DrawGizmos method has not been overriden from the MonoBehaviourGizmos class.
-			// If it hasn't, then we know that this type will never draw gizmos and we can skip it.
-			// This improves performance by not having to keep track of objects and check if they are active and enabled every frame.
-			bool mayDrawGizmos;
-			if (gizmoDrawerTypes.TryGetValue(tp, out mayDrawGizmos)) {
+			int index;
+			if (gizmoDrawerIndices.TryGetValue(tp, out index)) {
 			} else {
+				// Use reflection to figure out if the DrawGizmos method has not been overriden from the MonoBehaviourGizmos class.
+				// If it hasn't, then we know that this type will never draw gizmos and we can skip it.
+				// This improves performance by not having to keep track of objects and check if they are active and enabled every frame.
+
 				var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
 				// Check for a public method first, and then an explicit interface implementation.
 				var m = tp.GetMethod("DrawGizmos", flags) ?? tp.GetMethod("Pathfinding.Drawing.IDrawGizmos.DrawGizmos", flags) ?? tp.GetMethod("Drawing.IDrawGizmos.DrawGizmos", flags);
 				if (m == null) {
 					throw new System.Exception("Could not find the DrawGizmos method in type " + tp.Name);
 				}
-				mayDrawGizmos = m.DeclaringType != typeof(MonoBehaviourGizmos);
-				gizmoDrawerTypes[tp] = mayDrawGizmos;
+				var mayDrawGizmos = m.DeclaringType != typeof(MonoBehaviourGizmos);
+				if (mayDrawGizmos) {
+					index = gizmoDrawerIndices[tp] = gizmoDrawers.Count;
+					gizmoDrawers.Add(new GizmoDrawerGroup {
+						type = tp,
+						enabled = true,
+						drawers = new List<IDrawGizmos>(),
+						profilerMarker = new ProfilerMarker(ProfilerCategory.Render, "Gizmos for " + tp.Name),
+					});
+				} else {
+					index = gizmoDrawerIndices[tp] = -1;
+				}
 			}
-			if (!mayDrawGizmos) return;
+			if (index == -1) return;
 
-			gizmoDrawers.Add(item);
+			gizmoDrawers[index].drawers.Add(item);
 		}
 
 		/// <summary>

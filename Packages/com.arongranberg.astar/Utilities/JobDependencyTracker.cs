@@ -5,7 +5,8 @@ namespace Pathfinding.Jobs {
 	using Unity.Jobs;
 	using System.Collections.Generic;
 	using Unity.Collections.LowLevel.Unsafe;
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
+	using Pathfinding.Collections;
 	using System.Runtime.InteropServices;
 	using System.Diagnostics;
 
@@ -256,6 +257,9 @@ namespace Pathfinding.Jobs {
 		/// JobHandle that represents a dependency for all jobs.
 		/// All native arrays that are written (and have been tracked by this tracker) to will have their final results in them
 		/// when the returned job handle is complete.
+		///
+		/// Warning: Even though all dependencies are complete, the returned JobHandle's IsCompleted property may still return false.
+		/// This seems to be a Unity bug (or maybe its by design?).
 		/// </summary>
 		public JobHandle AllWritesDependency {
 			get {
@@ -443,9 +447,14 @@ namespace Pathfinding.Jobs {
 		/// </summary>
 		void Dispose () {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS && UNITY_2022_2_OR_NEWER
-			// Note: This can somehow fail in Unity 2021 and 2022.1, even when calling Complete on all jobs
-			UnityEngine.Assertions.Assert.IsTrue(AllWritesDependency.IsCompleted);
+			// Checks that AllWritesDependency is complete
+			// We cannot use AllWritesDependency directly because it's IsCompleted property may return false even though all individual dependencies are complete.
+			// (This seems to be a Unity bug)
+			for (int i = 0; i < slots.Count; i++) {
+				UnityEngine.Assertions.Assert.IsTrue(slots[i].lastWrite.handle.IsCompleted);
+			}
 #endif
+
 			for (int i = 0; i < slots.Count; i++) ListPool<JobInstance>.Release(slots[i].lastReads);
 
 			slots.Clear();
@@ -467,6 +476,7 @@ namespace Pathfinding.Jobs {
 	public struct TimeSlice {
 		public long endTick;
 		public static readonly TimeSlice Infinite = new TimeSlice { endTick = long.MaxValue };
+		public bool isInfinite => endTick == long.MaxValue;
 		public bool expired => Stopwatch.GetTimestamp() > endTick;
 
 		public static TimeSlice MillisFromNow (float millis) => new TimeSlice { endTick = Stopwatch.GetTimestamp() + (long)(millis * 10000) };
@@ -584,11 +594,7 @@ namespace Pathfinding.Jobs {
 		}
 	}
 
-	internal static class JobDependencyAnalyzerAssociated {
-		internal static UnityEngine.Profiling.CustomSampler getDependenciesSampler = UnityEngine.Profiling.CustomSampler.Create("GetDependencies");
-		internal static UnityEngine.Profiling.CustomSampler iteratingSlotsSampler = UnityEngine.Profiling.CustomSampler.Create("IteratingSlots");
-		internal static UnityEngine.Profiling.CustomSampler initSampler = UnityEngine.Profiling.CustomSampler.Create("Init");
-		internal static UnityEngine.Profiling.CustomSampler combineSampler = UnityEngine.Profiling.CustomSampler.Create("Combining");
+	static class JobDependencyAnalyzerAssociated {
 		internal static int[] tempJobDependencyHashes = new int[16];
 		internal static int jobCounter = 1;
 	}
@@ -668,8 +674,6 @@ namespace Pathfinding.Jobs {
 		}
 
 		static JobHandle GetDependencies (ref T data, JobDependencyTracker tracker, JobHandle additionalDependency, bool useAdditionalDependency) {
-			//JobDependencyAnalyzerAssociated.getDependenciesSampler.Begin();
-			//JobDependencyAnalyzerAssociated.initSampler.Begin();
 			if (!tracker.dependenciesScratchBuffer.IsCreated) tracker.dependenciesScratchBuffer = new NativeArray<JobHandle>(16, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 			var dependencies = tracker.dependenciesScratchBuffer;
 			var slots = tracker.slots;
@@ -677,7 +681,6 @@ namespace Pathfinding.Jobs {
 
 			int numDependencies = 0;
 
-			//JobDependencyAnalyzerAssociated.initSampler.End();
 			initReflectionData();
 #if DEBUG_JOBS
 			string dependenciesDebug = "";
@@ -744,7 +747,6 @@ namespace Pathfinding.Jobs {
 							break;
 						}
 					}
-					//JobDependencyAnalyzerAssociated.iteratingSlotsSampler.End();
 				}
 
 				if (useAdditionalDependency) {
@@ -759,15 +761,12 @@ namespace Pathfinding.Jobs {
 				UnityEngine.Debug.Log(typeof(T) + " depends on " + dependenciesDebug);
 #endif
 
-				// JobDependencyAnalyzerAssociated.getDependenciesSampler.End();
 				if (numDependencies == 0) {
 					return default;
 				} else if (numDependencies == 1) {
 					return dependencies[0];
 				} else {
-					//JobDependencyAnalyzerAssociated.combineSampler.Begin();
 					return JobHandle.CombineDependencies(dependencies.Slice(0, numDependencies));
-					//JobDependencyAnalyzerAssociated.combineSampler.End();
 				}
 			}
 		}

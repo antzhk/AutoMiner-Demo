@@ -13,6 +13,19 @@ namespace Pathfinding.RVO {
 	/// use that to move the object using a method it sees fit (for example using a CharacterController, using
 	/// transform.Translate or using a rigidbody).
 	///
+	/// \inspectorField{Radius, RVOController.radius}
+	/// \inspectorField{Height, RVOController.height}
+	/// \inspectorField{Center, RVOController.center}
+	/// \inspectorField{Agent Time Horizon, RVOController.agentTimeHorizon}
+	/// \inspectorField{Obstacle Time Horizon, RVOController.obstacleTimeHorizon}
+	/// \inspectorField{Max Neighbours, RVOController.maxNeighbours}
+	/// \inspectorField{Layer, RVOController.layer}
+	/// \inspectorField{Collides with, RVOController.collidesWith}
+	/// \inspectorField{Priority, RVOController.priority}
+	/// \inspectorField{Lock When Not Moving, RVOController.lockWhenNotMoving}
+	/// \inspectorField{Locked, RVOController.locked}
+	/// \inspectorField{Debug, RVOController.debug}
+	///
 	/// <code>
 	/// public void Update () {
 	///     // Just some point far away
@@ -31,7 +44,7 @@ namespace Pathfinding.RVO {
 	///
 	/// For documentation of many of the variables of this class: refer to the Pathfinding.RVO.IAgent interface.
 	///
-	/// Note: Requires a single RVOSimulator component in the scene
+	/// Note: Requires a single <see cref="RVOSimulator"/> component in the scene
 	///
 	/// See: Pathfinding.RVO.IAgent
 	/// See: RVOSimulator
@@ -189,22 +202,6 @@ namespace Pathfinding.RVO {
 			}
 		}
 
-		/// <summary>\details Deprecated:</summary>
-		[System.Obsolete("This field is obsolete in version 4.0 and will not affect anything. Use the LegacyRVOController if you need the old behaviour")]
-		public LayerMask mask { get { return 0; } set {} }
-
-		/// <summary>\details Deprecated:</summary>
-		[System.Obsolete("This field is obsolete in version 4.0 and will not affect anything. Use the LegacyRVOController if you need the old behaviour")]
-		public bool enableRotation { get { return false; } set {} }
-
-		/// <summary>\details Deprecated:</summary>
-		[System.Obsolete("This field is obsolete in version 4.0 and will not affect anything. Use the LegacyRVOController if you need the old behaviour")]
-		public float rotationSpeed { get { return 0; } set {} }
-
-		/// <summary>\details Deprecated:</summary>
-		[System.Obsolete("This field is obsolete in version 4.0 and will not affect anything. Use the LegacyRVOController if you need the old behaviour")]
-		public float maxSpeed { get { return 0; } set {} }
-
 		public MovementPlane movementPlaneMode => simulator?.MovementPlane ?? RVOSimulator.active?.movementPlane ?? MovementPlane.XZ;
 
 		/// <summary>Determines if the XY (2D) or XZ (3D) plane is used for movement</summary>
@@ -288,8 +285,20 @@ namespace Pathfinding.RVO {
 		/// Note that if you set the velocity the value that can be read from this property will not change until
 		/// the next simulation step.
 		///
+		/// <code>
+		/// void Update () {
+		///     var x = Input.GetAxis("Horizontal");
+		///     var y = Input.GetAxis("Vertical");
+		///
+		///     var v = new Vector3(x, 0, y) * speed;
+		///
+		///     // Override the RVOController's velocity. This will disable local avoidance calculations for one simulation step.
+		///     rvo.velocity = v;
+		///     transform.position += v * Time.deltaTime;
+		/// }
+		/// </code>
+		///
 		/// See: <see cref="Pathfinding::RVO::IAgent::ForceSetVelocity"/>
-		/// See: ManualRVOAgent.cs (view in online documentation for working links)
 		/// </summary>
 		public Vector3 velocity {
 			get {
@@ -359,15 +368,6 @@ namespace Pathfinding.RVO {
 		/// <summary>\copydocref{Pathfinding.RVO.IAgent.SetObstacleQuery}</summary>
 		public void SetObstacleQuery (GraphNode sourceNode) {
 			obstacleQuery = sourceNode;
-		}
-
-		/// <summary>
-		/// \copydocref{Pathfinding.RVO.IAgent.ForceSetVelocity}.
-		/// Deprecated: Set the <see cref="velocity"/> property instead
-		/// </summary>
-		[System.Obsolete("Set the 'velocity' property instead")]
-		public void ForceSetVelocity (Vector3 velocity) {
-			this.velocity = velocity;
 		}
 
 		/// <summary>
@@ -555,15 +555,6 @@ namespace Pathfinding.RVO {
 			if (lockWhenNotMoving) {
 				locked = speed < 0.001f;
 			}
-		}
-
-		/// <summary>
-		/// Teleport the agent to a new position.
-		/// Deprecated: Use transform.position instead, the RVOController can now handle that without any issues.
-		/// </summary>
-		[System.Obsolete("Use transform.position instead, the RVOController can now handle that without any issues.")]
-		public void Teleport (Vector3 pos) {
-			tr.position = pos;
 		}
 
 		public override void DrawGizmos () {

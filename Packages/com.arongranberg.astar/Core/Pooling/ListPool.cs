@@ -6,7 +6,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Pooling {
 	/// <summary>
 	/// Lightweight List Pool.
 	/// Handy class for pooling lists of type T.

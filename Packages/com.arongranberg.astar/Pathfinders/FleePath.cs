@@ -1,4 +1,5 @@
 using UnityEngine;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>

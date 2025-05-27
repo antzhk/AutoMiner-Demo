@@ -10,8 +10,10 @@ namespace Pathfinding.Graphs.Navmesh {
 	using Voxelization.Burst;
 	using Pathfinding.Util;
 	using Pathfinding.Jobs;
-	using Pathfinding.Drawing;
+	using Pathfinding.Collections;
+	using Pathfinding.Pooling;
 	using UnityEngine.Profiling;
+	using Unity.Collections.LowLevel.Unsafe;
 
 	[BurstCompile]
 	public class RecastMeshGatherer {
@@ -55,12 +57,13 @@ namespace Pathfinding.Graphs.Navmesh {
 			modificationsByLayer = RecastGraph.PerLayerModification.ToLayerLookup(perLayerModifications, RecastGraph.PerLayerModification.Default);
 			// 2D colliders default to being unwalkable
 			var default2D = RecastGraph.PerLayerModification.Default;
-			default2D.mode = RecastMeshObj.Mode.UnwalkableSurface;
+			default2D.mode = RecastNavmeshModifier.Mode.UnwalkableSurface;
 			modificationsByLayer2D = RecastGraph.PerLayerModification.ToLayerLookup(perLayerModifications, default2D);
 		}
 
 		struct TreeInfo {
 			public List<GatheredMesh> submeshes;
+			public Vector3 localScale;
 			public bool supportsRotation;
 		}
 
@@ -120,16 +123,16 @@ namespace Pathfinding.Graphs.Navmesh {
 			var meshes = new NativeArray<RasterizationMesh>(this.meshes.Count, Allocator.Persistent);
 			int meshBufferOffset = vertexBuffers.Count;
 
-			UnityEngine.Profiling.Profiler.BeginSample("Copying vertices");
+			Profiler.BeginSample("Copying vertices");
 			// TODO: We should be able to hold the `data` for the whole scan and not have to copy all vertices/triangles
 			for (int i = 0; i < data.Length; i++) {
 				MeshUtility.GetMeshData(data, i, out var verts, out var tris);
 				vertexBuffers.Add(verts);
 				triangleBuffers.Add(tris);
 			}
-			UnityEngine.Profiling.Profiler.EndSample();
+			Profiler.EndSample();
 
-			UnityEngine.Profiling.Profiler.BeginSample("Creating RasterizationMeshes");
+			Profiler.BeginSample("Creating RasterizationMeshes");
 			for (int i = 0; i < meshes.Length; i++) {
 				var gatheredMesh = this.meshes[i];
 				int bufferIndex;
@@ -160,7 +163,7 @@ namespace Pathfinding.Graphs.Navmesh {
 					flatten = gatheredMesh.flatten,
 				};
 			}
-			UnityEngine.Profiling.Profiler.EndSample();
+			Profiler.EndSample();
 
 			cachedMeshes.Clear();
 			ObjectPoolSimple<Dictionary<MeshCacheItem, int> >.Release(ref cachedMeshes);
@@ -182,6 +185,8 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// Add vertex and triangle buffers that can later be used to create a <see cref="GatheredMesh"/>.
 		///
 		/// The returned index can be used in the <see cref="GatheredMesh.meshDataIndex"/> field of the <see cref="GatheredMesh"/> struct.
+		///
+		/// You can use the returned index multiple times with different matrices, to create instances of the same object in multiple locations.
 		/// </summary>
 		public int AddMeshBuffers (Vector3[] vertices, int[] triangles) {
 			return AddMeshBuffers(new NativeArray<Vector3>(vertices, Allocator.Persistent), new NativeArray<int>(triangles, Allocator.Persistent));
@@ -191,6 +196,8 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// Add vertex and triangle buffers that can later be used to create a <see cref="GatheredMesh"/>.
 		///
 		/// The returned index can be used in the <see cref="GatheredMesh.meshDataIndex"/> field of the <see cref="GatheredMesh"/> struct.
+		///
+		/// You can use the returned index multiple times with different matrices, to create instances of the same object in multiple locations.
 		/// </summary>
 		public int AddMeshBuffers (NativeArray<Vector3> vertices, NativeArray<int> triangles) {
 			var meshDataIndex = -vertexBuffers.Count-1;
@@ -258,15 +265,15 @@ namespace Pathfinding.Graphs.Navmesh {
 				bounds = new Bounds();
 			}
 
-			public void ApplyRecastMeshObj (RecastMeshObj recastMeshObj) {
-				area = AreaFromSurfaceMode(recastMeshObj.mode, recastMeshObj.surfaceID);
-				areaIsTag = recastMeshObj.mode == RecastMeshObj.Mode.WalkableSurfaceWithTag;
-				solid |= recastMeshObj.solid;
+			public void ApplyNavmeshModifier (RecastNavmeshModifier navmeshModifier) {
+				area = AreaFromSurfaceMode(navmeshModifier.mode, navmeshModifier.surfaceID);
+				areaIsTag = navmeshModifier.mode == RecastNavmeshModifier.Mode.WalkableSurfaceWithTag;
+				solid |= navmeshModifier.solid;
 			}
 
 			public void ApplyLayerModification (RecastGraph.PerLayerModification modification) {
 				area = AreaFromSurfaceMode(modification.mode, modification.surfaceID);
-				areaIsTag = modification.mode == RecastMeshObj.Mode.WalkableSurfaceWithTag;
+				areaIsTag = modification.mode == RecastNavmeshModifier.Mode.WalkableSurfaceWithTag;
 			}
 		}
 
@@ -308,7 +315,7 @@ namespace Pathfinding.Graphs.Navmesh {
 		bool MeshFilterShouldBeIncluded (MeshFilter filter) {
 			if (filter.TryGetComponent<Renderer>(out var rend)) {
 				if (filter.sharedMesh != null && rend.enabled && (((1 << filter.gameObject.layer) & mask) != 0 || (tagMask.Count > 0 && tagMask.Contains(filter.tag)))) {
-					if (!(filter.TryGetComponent<RecastMeshObj>(out var rmo) && rmo.enabled)) {
+					if (!(filter.TryGetComponent<RecastNavmeshModifier>(out var rmo) && rmo.enabled)) {
 						return true;
 					}
 				}
@@ -462,47 +469,47 @@ namespace Pathfinding.Graphs.Navmesh {
 			}
 		}
 
-		static int AreaFromSurfaceMode (RecastMeshObj.Mode mode, int surfaceID) {
+		static int AreaFromSurfaceMode (RecastNavmeshModifier.Mode mode, int surfaceID) {
 			switch (mode) {
 			default:
-			case RecastMeshObj.Mode.UnwalkableSurface:
+			case RecastNavmeshModifier.Mode.UnwalkableSurface:
 				return -1;
-			case RecastMeshObj.Mode.WalkableSurface:
+			case RecastNavmeshModifier.Mode.WalkableSurface:
 				return 0;
-			case RecastMeshObj.Mode.WalkableSurfaceWithSeam:
-			case RecastMeshObj.Mode.WalkableSurfaceWithTag:
+			case RecastNavmeshModifier.Mode.WalkableSurfaceWithSeam:
+			case RecastNavmeshModifier.Mode.WalkableSurfaceWithTag:
 				return surfaceID;
 			}
 		}
 
-		/// <summary>Find all relevant RecastMeshObj components and create ExtraMeshes for them</summary>
-		public void CollectRecastMeshObjs () {
-			var buffer = ListPool<RecastMeshObj>.Claim();
+		/// <summary>Find all relevant RecastNavmeshModifier components and create ExtraMeshes for them</summary>
+		public void CollectRecastNavmeshModifiers () {
+			var buffer = ListPool<RecastNavmeshModifier>.Claim();
 
-			// Get all recast mesh objects inside the bounds
-			RecastMeshObj.GetAllInBounds(buffer, bounds);
+			// Get all recast navmesh modifiers inside the bounds
+			RecastNavmeshModifier.GetAllInBounds(buffer, bounds);
 
 			// Create an RasterizationMesh object
-			// for each RecastMeshObj
+			// for each RecastNavmeshModifier
 			for (int i = 0; i < buffer.Count; i++) {
-				AddRecastMeshObj(buffer[i]);
+				AddNavmeshModifier(buffer[i]);
 			}
 
-			ListPool<RecastMeshObj>.Release(ref buffer);
+			ListPool<RecastNavmeshModifier>.Release(ref buffer);
 		}
 
-		void AddRecastMeshObj (RecastMeshObj recastMeshObj) {
-			if (recastMeshObj.includeInScan == RecastMeshObj.ScanInclusion.AlwaysExclude) return;
-			if (recastMeshObj.includeInScan == RecastMeshObj.ScanInclusion.Auto && (((mask >> recastMeshObj.gameObject.layer) & 1) == 0 && !tagMask.Contains(recastMeshObj.tag))) return;
+		void AddNavmeshModifier (RecastNavmeshModifier navmeshModifier) {
+			if (navmeshModifier.includeInScan == RecastNavmeshModifier.ScanInclusion.AlwaysExclude) return;
+			if (navmeshModifier.includeInScan == RecastNavmeshModifier.ScanInclusion.Auto && (((mask >> navmeshModifier.gameObject.layer) & 1) == 0 && !tagMask.Contains(navmeshModifier.tag))) return;
 
-			recastMeshObj.ResolveMeshSource(out var filter, out var collider, out var collider2D);
+			navmeshModifier.ResolveMeshSource(out var filter, out var collider, out var collider2D);
 
 			if (filter != null) {
 				// Add based on mesh filter
 				Mesh mesh = filter.sharedMesh;
 				if (filter.TryGetComponent<MeshRenderer>(out var rend) && mesh != null) {
 					if (ConvertMeshToGatheredMesh(rend, filter.sharedMesh, out var gatheredMesh)) {
-						gatheredMesh.ApplyRecastMeshObj(recastMeshObj);
+						gatheredMesh.ApplyNavmeshModifier(navmeshModifier);
 						meshes.Add(gatheredMesh);
 					}
 				}
@@ -510,16 +517,16 @@ namespace Pathfinding.Graphs.Navmesh {
 				// Add based on collider
 
 				if (ConvertColliderToGatheredMesh(collider) is GatheredMesh rmesh) {
-					rmesh.ApplyRecastMeshObj(recastMeshObj);
+					rmesh.ApplyNavmeshModifier(navmeshModifier);
 					meshes.Add(rmesh);
 				}
 			} else if (collider2D != null) {
 				// 2D colliders are handled separately
 			} else {
-				if (recastMeshObj.geometrySource == RecastMeshObj.GeometrySource.Auto) {
-					Debug.LogError("Couldn't get geometry source for RecastMeshObject ("+recastMeshObj.gameObject.name +"). It didn't have a collider or MeshFilter+Renderer attached", recastMeshObj.gameObject);
+				if (navmeshModifier.geometrySource == RecastNavmeshModifier.GeometrySource.Auto) {
+					Debug.LogError("Couldn't get geometry source for RecastNavmeshModifier ("+navmeshModifier.gameObject.name +"). It didn't have a collider or MeshFilter+Renderer attached", navmeshModifier.gameObject);
 				} else {
-					Debug.LogError("Couldn't get geometry source for RecastMeshObject ("+recastMeshObj.gameObject.name +"). It didn't have a " + recastMeshObj.geometrySource + " attached", recastMeshObj.gameObject);
+					Debug.LogError("Couldn't get geometry source for RecastNavmeshModifier ("+navmeshModifier.gameObject.name +"). It didn't have a " + navmeshModifier.geometrySource + " attached", navmeshModifier.gameObject);
 				}
 			}
 		}
@@ -534,10 +541,11 @@ namespace Pathfinding.Graphs.Navmesh {
 					if (terrains[j].terrainData == null) continue;
 
 					Profiler.BeginSample("Generate terrain chunks");
-					GenerateTerrainChunks(terrains[j], bounds, desiredChunkSize);
+					bool anyTerrainChunks = GenerateTerrainChunks(terrains[j], bounds, desiredChunkSize);
 					Profiler.EndSample();
 
-					if (rasterizeTrees) {
+					// Don't rasterize trees if the terrain did not intersect the graph bounds
+					if (rasterizeTrees && anyTerrainChunks) {
 						Profiler.BeginSample("Find tree meshes");
 						// Rasterize all tree colliders on this terrain object
 						CollectTreeMeshes(terrains[j]);
@@ -547,21 +555,32 @@ namespace Pathfinding.Graphs.Navmesh {
 			}
 		}
 
-		void GenerateTerrainChunks (Terrain terrain, Bounds bounds, float desiredChunkSize) {
+		static int NonNegativeModulus (int x, int m) {
+			int r = x%m;
+			return r < 0 ? r+m : r;
+		}
+
+		/// <summary>Returns ceil(lhs/rhs), i.e lhs/rhs rounded up</summary>
+		static int CeilDivision (int lhs, int rhs) {
+			return (lhs + rhs - 1)/rhs;
+		}
+
+		bool GenerateTerrainChunks (Terrain terrain, Bounds bounds, float desiredChunkSize) {
 			var terrainData = terrain.terrainData;
 
 			if (terrainData == null)
 				throw new ArgumentException("Terrain contains no terrain data");
 
 			Vector3 offset = terrain.GetPosition();
-			Vector3 center = offset + terrainData.size * 0.5F;
+			var terrainSize = terrainData.size;
+			Vector3 center = offset + terrainSize * 0.5F;
 
 			// Figure out the bounds of the terrain in world space
-			var terrainBounds = new Bounds(center, terrainData.size);
+			var terrainBounds = new Bounds(center, terrainSize);
 
 			// Only include terrains which intersects the graph
 			if (!terrainBounds.Intersects(bounds))
-				return;
+				return false;
 
 			// Original heightmap size
 			int heightmapWidth = terrainData.heightmapResolution;
@@ -569,7 +588,7 @@ namespace Pathfinding.Graphs.Navmesh {
 
 			// Size of a single sample
 			Vector3 sampleSize = terrainData.heightmapScale;
-			sampleSize.y = terrainData.size.y;
+			sampleSize.y = terrainSize.y;
 
 			// Make chunks at least 12 quads wide
 			// since too small chunks just decreases performance due
@@ -582,27 +601,42 @@ namespace Pathfinding.Graphs.Navmesh {
 			var chunkSizeAlongZ = Mathf.CeilToInt(Mathf.Max(desiredChunkSize / (sampleSize.z * terrainDownsamplingFactor), MinChunkSize)) * terrainDownsamplingFactor;
 			chunkSizeAlongX = Mathf.Min(chunkSizeAlongX, heightmapWidth);
 			chunkSizeAlongZ = Mathf.Min(chunkSizeAlongZ, heightmapDepth);
-			var worldChunkSizeAlongX = chunkSizeAlongX * sampleSize.x;
-			var worldChunkSizeAlongZ = chunkSizeAlongZ * sampleSize.z;
 
-			// Figure out which chunks might intersect the bounding box
-			var allChunks = new IntRect(0, 0, heightmapWidth / chunkSizeAlongX, heightmapDepth / chunkSizeAlongZ);
-			var chunks = float.IsFinite(bounds.size.x) ? new IntRect(
-				Mathf.FloorToInt((bounds.min.x - offset.x) / worldChunkSizeAlongX),
-				Mathf.FloorToInt((bounds.min.z - offset.z) / worldChunkSizeAlongZ),
-				Mathf.FloorToInt((bounds.max.x - offset.x) / worldChunkSizeAlongX),
-				Mathf.FloorToInt((bounds.max.z - offset.z) / worldChunkSizeAlongZ)
-				) : allChunks;
-			chunks = IntRect.Intersection(chunks, allChunks);
-			if (!chunks.IsValid()) return;
+			Vector2Int startSample, chunks;
+			if (float.IsFinite(bounds.size.x)) {
+				startSample = new Vector2Int(
+					Mathf.FloorToInt((bounds.min.x - offset.x) / sampleSize.x),
+					Mathf.FloorToInt((bounds.min.z - offset.z) / sampleSize.z)
+					);
 
-			// Sample the terrain heightmap
-			var sampleRect = new IntRect(
-				chunks.xmin * chunkSizeAlongX,
-				chunks.ymin * chunkSizeAlongZ,
-				Mathf.Min(heightmapWidth, (chunks.xmax+1) * chunkSizeAlongX) - 1,
-				Mathf.Min(heightmapDepth, (chunks.ymax+1) * chunkSizeAlongZ) - 1
-				);
+				// Ensure we always start at a multiple of the terrainDownsamplingFactor.
+				// Otherwise, the generated meshes may not look the same, depending on the original bounds.
+				// Not rounding would not technically be wrong, but this makes it more predictable.
+				startSample.x -= NonNegativeModulus(startSample.x, terrainDownsamplingFactor);
+				startSample.y -= NonNegativeModulus(startSample.y, terrainDownsamplingFactor);
+
+				// Figure out which chunks might intersect the bounding box
+				var worldChunkSizeAlongX = chunkSizeAlongX * sampleSize.x;
+				var worldChunkSizeAlongZ = chunkSizeAlongZ * sampleSize.z;
+				chunks = new Vector2Int(
+					Mathf.CeilToInt((bounds.max.x - offset.x - startSample.x * sampleSize.x) / worldChunkSizeAlongX),
+					Mathf.CeilToInt((bounds.max.z - offset.z - startSample.y * sampleSize.z) / worldChunkSizeAlongZ)
+					);
+			} else {
+				startSample = new Vector2Int(0, 0);
+				chunks = new Vector2Int(CeilDivision(heightmapWidth, chunkSizeAlongX), CeilDivision(heightmapDepth, chunkSizeAlongZ));
+			}
+
+			// Figure out which samples we need from the terrain heightmap
+			var sampleRect = new IntRect(0, 0, chunks.x * chunkSizeAlongX - 1, chunks.y * chunkSizeAlongZ - 1).Offset(startSample);
+			var allSamples = new IntRect(0, 0, heightmapWidth - 1, heightmapDepth - 1);
+			// Clamp the samples to the heightmap bounds
+			sampleRect = IntRect.Intersection(sampleRect, allSamples);
+			if (!sampleRect.IsValid()) return false;
+
+			chunks = new Vector2Int(CeilDivision(sampleRect.Width, chunkSizeAlongX), CeilDivision(sampleRect.Height, chunkSizeAlongZ));
+
+			Profiler.BeginSample("Get heightmap data");
 			float[, ] heights = terrainData.GetHeights(
 				sampleRect.xmin,
 				sampleRect.ymin,
@@ -615,63 +649,88 @@ namespace Pathfinding.Graphs.Navmesh {
 				sampleRect.Width - 1,
 				sampleRect.Height - 1
 				);
+			Profiler.EndSample();
 
-			var chunksOffset = offset + new Vector3(chunks.xmin * chunkSizeAlongX * sampleSize.x, 0, chunks.ymin * chunkSizeAlongZ * sampleSize.z);
-			for (int z = chunks.ymin; z <= chunks.ymax; z++) {
-				for (int x = chunks.xmin; x <= chunks.xmax; x++) {
-					var chunk = ConvertHeightmapChunkToGatheredMesh(
-						heights,
-						holes,
-						sampleSize,
-						chunksOffset,
-						(x - chunks.xmin) * chunkSizeAlongX,
-						(z - chunks.ymin) * chunkSizeAlongZ,
-						chunkSizeAlongX,
-						chunkSizeAlongZ,
-						terrainDownsamplingFactor
-						);
-					chunk.ApplyLayerModification(modificationsByLayer[terrain.gameObject.layer]);
-					meshes.Add(chunk);
+			unsafe {
+				var heightsSpan = new UnsafeSpan<float>(heights, out var gcHandle1);
+				var holesSpan = new UnsafeSpan<bool>(holes, out var gcHandle2);
+
+				var chunksOffset = offset + new Vector3(sampleRect.xmin * sampleSize.x, 0, sampleRect.ymin * sampleSize.z);
+				var chunksMatrix = Matrix4x4.TRS(chunksOffset, Quaternion.identity, sampleSize);
+				for (int z = 0; z < chunks.y; z++) {
+					for (int x = 0; x < chunks.x; x++) {
+						Profiler.BeginSample("Generate chunk");
+						GenerateHeightmapChunk(
+							ref heightsSpan,
+							ref holesSpan,
+							sampleRect.Width,
+							sampleRect.Height,
+							x * chunkSizeAlongX,
+							z * chunkSizeAlongZ,
+							chunkSizeAlongX,
+							chunkSizeAlongZ,
+							terrainDownsamplingFactor,
+							out var vertsSpan,
+							out var trisSpan
+							);
+						Profiler.EndSample();
+
+						var verts = vertsSpan.MoveToNativeArray(Allocator.Persistent);
+						var tris = trisSpan.MoveToNativeArray(Allocator.Persistent);
+
+						var meshDataIndex = AddMeshBuffers(verts, tris);
+
+						var chunk = new GatheredMesh {
+							meshDataIndex = meshDataIndex,
+							// An empty bounding box indicates that it should be calculated from the vertices later.
+							bounds = new Bounds(),
+							indexStart = 0,
+							indexEnd = -1,
+							areaIsTag = false,
+							area = 0,
+							solid = false,
+							matrix = chunksMatrix,
+							doubleSided = false,
+							flatten = false,
+						};
+						chunk.ApplyLayerModification(modificationsByLayer[terrain.gameObject.layer]);
+
+						meshes.Add(chunk);
+					}
 				}
-			}
-		}
 
-		/// <summary>Returns ceil(lhs/rhs), i.e lhs/rhs rounded up</summary>
-		static int CeilDivision (int lhs, int rhs) {
-			return (lhs + rhs - 1)/rhs;
+				UnsafeUtility.ReleaseGCObject(gcHandle1);
+				UnsafeUtility.ReleaseGCObject(gcHandle2);
+			}
+			return true;
 		}
 
 		/// <summary>Generates a terrain chunk mesh</summary>
-		public GatheredMesh ConvertHeightmapChunkToGatheredMesh (float[, ] heights, bool[,] holes, Vector3 sampleSize, Vector3 offset, int x0, int z0, int width, int depth, int stride) {
+		[BurstCompile]
+		public static void GenerateHeightmapChunk (ref UnsafeSpan<float> heights, ref UnsafeSpan<bool> holes, int heightmapWidth, int heightmapDepth, int x0, int z0, int width, int depth, int stride, out UnsafeSpan<Vector3> verts, out UnsafeSpan<int> tris) {
 			// Downsample to a smaller mesh (full resolution will take a long time to rasterize)
 			// Round up the width to the nearest multiple of terrainSampleSize and then add 1
 			// (off by one because there are vertices at the edge of the mesh)
-			var heightmapDepth = heights.GetLength(0);
-			var heightmapWidth = heights.GetLength(1);
 			int resultWidth = CeilDivision(Mathf.Min(width, heightmapWidth - x0), stride) + 1;
 			int resultDepth = CeilDivision(Mathf.Min(depth, heightmapDepth - z0), stride) + 1;
 
 			// Create a mesh from the heightmap
 			var numVerts = resultWidth * resultDepth;
-			var verts = new NativeArray<Vector3>(numVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-			int numTris = (resultWidth-1)*(resultDepth-1)*2*3;
-			var tris = new NativeArray<int>(numTris, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-			// Using an UnsafeSpan instead of a NativeArray is much faster when writing to the array from C#
-			var vertsSpan = verts.AsUnsafeSpan();
+			var numTris = (resultWidth-1)*(resultDepth-1)*2*3;
+			verts = new UnsafeSpan<Vector3>(Allocator.Persistent, numVerts);
+			tris = new UnsafeSpan<int>(Allocator.Persistent, numTris);
 
 			// Create lots of vertices
 			for (int z = 0; z < resultDepth; z++) {
 				int sampleZ = Math.Min(z0 + z*stride, heightmapDepth-1);
 				for (int x = 0; x < resultWidth; x++) {
 					int sampleX = Math.Min(x0 + x*stride, heightmapWidth-1);
-					vertsSpan[z*resultWidth + x] = new Vector3(sampleX * sampleSize.x, heights[sampleZ, sampleX]*sampleSize.y, sampleZ * sampleSize.z) + offset;
+					verts[z*resultWidth + x] = new Vector3(sampleX, heights[sampleZ*heightmapWidth + sampleX], sampleZ);
 				}
 			}
 
 			// Create the mesh by creating triangles in a grid like pattern
 			int triangleIndex = 0;
-			var trisSpan = tris.AsUnsafeSpan();
 			for (int z = 0; z < resultDepth-1; z++) {
 				for (int x = 0; x < resultWidth-1; x++) {
 					// Try to check if the center of the cell is a hole or not.
@@ -679,48 +738,36 @@ namespace Pathfinding.Graphs.Navmesh {
 					int sampleX = Math.Min(x0 + stride/2 + x*stride, heightmapWidth-2);
 					int sampleZ = Math.Min(z0 + stride/2 + z*stride, heightmapDepth-2);
 
-					if (holes[sampleZ, sampleX]) {
+					if (holes[sampleZ*(heightmapWidth-1) + sampleX]) {
 						// Not a hole, generate a mesh here
-						trisSpan[triangleIndex]   = z*resultWidth + x;
-						trisSpan[triangleIndex+1] = (z+1)*resultWidth + x+1;
-						trisSpan[triangleIndex+2] = z*resultWidth + x+1;
+						tris[triangleIndex]   = z*resultWidth + x;
+						tris[triangleIndex+1] = (z+1)*resultWidth + x+1;
+						tris[triangleIndex+2] = z*resultWidth + x+1;
 						triangleIndex += 3;
-						trisSpan[triangleIndex]   = z*resultWidth + x;
-						trisSpan[triangleIndex+1] = (z+1)*resultWidth + x;
-						trisSpan[triangleIndex+2] = (z+1)*resultWidth + x+1;
+						tris[triangleIndex]   = z*resultWidth + x;
+						tris[triangleIndex+1] = (z+1)*resultWidth + x;
+						tris[triangleIndex+2] = (z+1)*resultWidth + x+1;
 						triangleIndex += 3;
 					}
 				}
 			}
 
-
-			var meshDataIndex = AddMeshBuffers(verts, tris);
-
-			var mesh = new GatheredMesh {
-				meshDataIndex = meshDataIndex,
-				// An empty bounding box indicates that it should be calculated from the vertices later.
-				bounds = new Bounds(),
-				indexStart = 0,
-				indexEnd = triangleIndex,
-				areaIsTag = false,
-				area = 0,
-				solid = false,
-				matrix = Matrix4x4.identity,
-				doubleSided = false,
-				flatten = false,
-			};
-			return mesh;
+			tris = tris.Slice(0, triangleIndex);
 		}
 
 		void CollectTreeMeshes (Terrain terrain) {
+			Profiler.BeginSample("Get tree data from terrain");
 			TerrainData data = terrain.terrainData;
 			var treeInstances = data.treeInstances;
 			var treePrototypes = data.treePrototypes;
+			var terrainPos = terrain.transform.position;
+			var terrainSize = data.size;
+			Profiler.EndSample();
 
-			for (int i = 0; i < treeInstances.Length; i++) {
-				TreeInstance instance = treeInstances[i];
-				TreePrototype prot = treePrototypes[instance.prototypeIndex];
-
+			Profiler.BeginSample("Process tree prototypes");
+			var treeInfos = new TreeInfo[treePrototypes.Length];
+			for (int i = 0; i < treePrototypes.Length; i++) {
+				TreePrototype prot = treePrototypes[i];
 				// Make sure that the tree prefab exists
 				if (prot.prefab == null) {
 					continue;
@@ -732,6 +779,7 @@ namespace Pathfinding.Graphs.Navmesh {
 					// The unity terrain system only supports rotation for trees with a LODGroup on the root object.
 					// Unity still sets the instance.rotation field to values even they are not used, so we need to explicitly check for this.
 					treeInfo.supportsRotation = prot.prefab.TryGetComponent<LODGroup>(out var dummy);
+					treeInfo.localScale = prot.prefab.transform.localScale;
 
 					var colliders = ListPool<Collider>.Claim();
 					var rootMatrixInv = prot.prefab.transform.localToWorldMatrix.inverse;
@@ -742,20 +790,20 @@ namespace Pathfinding.Graphs.Navmesh {
 
 						// Generate a mesh from the collider
 						if (ConvertColliderToGatheredMesh(collider, rootMatrixInv * collider.transform.localToWorldMatrix) is GatheredMesh mesh) {
-							// For trees, we only suppport generating a mesh from a collider. So we ignore the recastMeshObj.geometrySource field.
-							if (collider.gameObject.TryGetComponent<RecastMeshObj>(out var recastMeshObj) && recastMeshObj.enabled) {
-								if (recastMeshObj.includeInScan == RecastMeshObj.ScanInclusion.AlwaysExclude) continue;
+							// For trees, we only suppport generating a mesh from a collider. So we ignore the navmeshModifier.geometrySource field.
+							if (collider.gameObject.TryGetComponent<RecastNavmeshModifier>(out var navmeshModifier) && navmeshModifier.enabled) {
+								if (navmeshModifier.includeInScan == RecastNavmeshModifier.ScanInclusion.AlwaysExclude) continue;
 
-								mesh.ApplyRecastMeshObj(recastMeshObj);
+								mesh.ApplyNavmeshModifier(navmeshModifier);
 							} else {
 								mesh.ApplyLayerModification(modificationsByLayer[collider.gameObject.layer]);
 							}
 
-							// The bounds are incorrectly based on collider.bounds.
+							// The bounds are incorrectly based on collider.bounds, and may not even be initialized by the physics system.
 							// It is incorrect because the collider is on the prefab, not on the tree instance
 							// so we need to recalculate the bounds based on the actual vertex positions
 							mesh.RecalculateBounds();
-							//mesh.matrix = collider.transform.localToWorldMatrix.inverse * mesh.matrix;
+
 							treeInfo.submeshes.Add(mesh);
 						}
 					}
@@ -763,12 +811,21 @@ namespace Pathfinding.Graphs.Navmesh {
 					ListPool<Collider>.Release(ref colliders);
 					cachedTreePrefabs[prot.prefab] = treeInfo;
 				}
+				treeInfos[i] = treeInfo;
+			}
+			Profiler.EndSample();
 
-				var treePosition = terrain.transform.position +  Vector3.Scale(instance.position, data.size);
+			Profiler.BeginSample("Convert trees to meshes");
+			for (int i = 0; i < treeInstances.Length; i++) {
+				TreeInstance instance = treeInstances[i];
+				var treeInfo = treeInfos[instance.prototypeIndex];
+				if (treeInfo.submeshes == null || treeInfo.submeshes.Count == 0) continue;
+
+				var treePosition = terrainPos +  Vector3.Scale(instance.position, terrainSize);
 				var instanceSize = new Vector3(instance.widthScale, instance.heightScale, instance.widthScale);
-				var prefabScale = Vector3.Scale(instanceSize, prot.prefab.transform.localScale);
-				var rotation = treeInfo.supportsRotation ? instance.rotation : 0;
-				var matrix = Matrix4x4.TRS(treePosition, Quaternion.AngleAxis(rotation * Mathf.Rad2Deg, Vector3.up), prefabScale);
+				var prefabScale = Vector3.Scale(instanceSize, treeInfo.localScale);
+				var rotation = treeInfo.supportsRotation ? Quaternion.AngleAxis(instance.rotation * Mathf.Rad2Deg, Vector3.up) : Quaternion.identity;
+				var matrix = Matrix4x4.TRS(treePosition, rotation, prefabScale);
 
 				for (int j = 0; j < treeInfo.submeshes.Count; j++) {
 					var item = treeInfo.submeshes[j];
@@ -776,10 +833,11 @@ namespace Pathfinding.Graphs.Navmesh {
 					meshes.Add(item);
 				}
 			}
+			Profiler.EndSample();
 		}
 
 		bool ShouldIncludeCollider (Collider collider) {
-			if (!collider.enabled || collider.isTrigger || !collider.bounds.Intersects(bounds) || (collider.TryGetComponent<RecastMeshObj>(out var rmo) && rmo.enabled)) return false;
+			if (!collider.enabled || collider.isTrigger || !collider.bounds.Intersects(bounds) || (collider.TryGetComponent<RecastNavmeshModifier>(out var rmo) && rmo.enabled)) return false;
 
 			var go = collider.gameObject;
 			if (((mask >> go.layer) & 1) != 0) return true;
@@ -1037,10 +1095,10 @@ namespace Pathfinding.Graphs.Navmesh {
 			// - that the collider is not a trigger
 
 			// This is not completely analogous to ShouldIncludeCollider, as this one will
-			// always include the collider if it has an attached RecastMeshObj, while
-			// 3D colliders handle RecastMeshObj components separately.
+			// always include the collider if it has an attached RecastNavmeshModifier, while
+			// 3D colliders handle RecastNavmeshModifier components separately.
 			if (((mask >> collider.gameObject.layer) & 1) != 0) return true;
-			if ((collider.attachedRigidbody as Component ?? collider).TryGetComponent<RecastMeshObj>(out var rmo) && rmo.enabled && rmo.includeInScan == RecastMeshObj.ScanInclusion.AlwaysInclude) return true;
+			if ((collider.attachedRigidbody as Component ?? collider).TryGetComponent<RecastNavmeshModifier>(out var rmo) && rmo.enabled && rmo.includeInScan == RecastNavmeshModifier.ScanInclusion.AlwaysInclude) return true;
 
 			for (int i = 0; i < tagMask.Count; i++) {
 				if (collider.CompareTag(tagMask[i])) return true;
@@ -1067,7 +1125,7 @@ namespace Pathfinding.Graphs.Navmesh {
 				var max2D = (Vector2)bounds.max;
 				var filter = new ContactFilter2D().NoFilter();
 				// It would be nice to add the layer mask filter here as well,
-				// but we cannot since a collider may have a RecastMeshObj component
+				// but we cannot since a collider may have a RecastNavmeshModifier component
 				// attached, and in that case we want to include it even if it is on an excluded layer.
 				// The user may also want to include objects based on tags.
 				// But we can at least exclude all triggers.
@@ -1098,7 +1156,7 @@ namespace Pathfinding.Graphs.Navmesh {
 				if (!bounds.Intersects(shape.bounds)) continue;
 
 				var coll = colliderBuffer[shape.tag];
-				(coll.attachedRigidbody as Component ?? coll).TryGetComponent<RecastMeshObj>(out var recastMeshObj);
+				(coll.attachedRigidbody as Component ?? coll).TryGetComponent<RecastNavmeshModifier>(out var navmeshModifier);
 
 				var rmesh = new GatheredMesh {
 					meshDataIndex = bufferIndex,
@@ -1114,9 +1172,9 @@ namespace Pathfinding.Graphs.Navmesh {
 					flatten = true,
 				};
 
-				if (recastMeshObj != null) {
-					if (recastMeshObj.includeInScan == RecastMeshObj.ScanInclusion.AlwaysExclude) continue;
-					rmesh.ApplyRecastMeshObj(recastMeshObj);
+				if (navmeshModifier != null) {
+					if (navmeshModifier.includeInScan == RecastNavmeshModifier.ScanInclusion.AlwaysExclude) continue;
+					rmesh.ApplyNavmeshModifier(navmeshModifier);
 				} else {
 					rmesh.ApplyLayerModification(modificationsByLayer2D[coll.gameObject.layer]);
 				}

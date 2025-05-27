@@ -1,4 +1,5 @@
-namespace Pathfinding.Util {
+// #define DEBUG_ALLOCATOR
+namespace Pathfinding.Collections {
 	using Unity.Mathematics;
 	using Unity.Collections;
 	using Unity.Collections.LowLevel.Unsafe;
@@ -16,14 +17,32 @@ namespace Pathfinding.Util {
 	/// than allocating them using the Persistent allocator.
 	/// </summary>
 	public struct SlabAllocator<T> where T : unmanaged {
-		public const int MaxAllocationSizeIndex = 10;
-		const uint UsedBit = 1u << 31;
-		const uint AllocatedBit = 1u << 30;
-		const uint LengthMask = AllocatedBit - 1;
 		/// <summary>Allocation which is always invalid</summary>
 		public const int InvalidAllocation = -2;
 		/// <summary>Allocation representing a zero-length array</summary>
 		public const int ZeroLengthArray = -1;
+
+		// The max number of items we are likely to need to allocate comes from the connections array of each hierarchical node.
+		// If you have a ton (thousands) of off-mesh links next to each other, then that array can get large.
+		public const int MaxAllocationSizeIndex = 12;
+		public const int MaxAllocationSize = 1 << MaxAllocationSizeIndex;
+
+		internal static int SizeIndexToElements (int sizeIndex) {
+			return 1 << sizeIndex;
+		}
+
+		internal static int ElementsToSizeIndex (int nElements) {
+			if (nElements < 0) throw new System.Exception("SlabAllocator cannot allocate less than 1 element");
+			if (nElements == 0) return 0;
+			int sizeIndex = CollectionHelper.Log2Ceil(nElements);
+			if (sizeIndex > MaxAllocationSizeIndex) throw new System.Exception("SlabAllocator cannot allocate more than MaxAllocationSize elements.");
+			return sizeIndex;
+		}
+
+		const uint UsedBit = 1u << 31;
+		const uint AllocatedBit = 1u << 30;
+		const uint LengthMask = AllocatedBit - 1;
+		public bool IsDebugAllocator => false;
 
 		[NativeDisableUnsafePtrRestriction]
 		unsafe AllocatorData* data;
@@ -103,10 +122,6 @@ namespace Pathfinding.Util {
 			}
 		}
 
-		public List GetList (int allocatedIndex) {
-			return new List(this, allocatedIndex);
-		}
-
 		public void Realloc (ref int allocatedIndex, int nElements) {
 			CheckDisposed();
 			if (allocatedIndex == ZeroLengthArray) {
@@ -138,18 +153,6 @@ namespace Pathfinding.Util {
 					allocatedIndex = newAllocation;
 				}
 			}
-		}
-
-		internal static int SizeIndexToElements (int sizeIndex) {
-			return 1 << sizeIndex;
-		}
-
-		internal static int ElementsToSizeIndex (int nElements) {
-			if (nElements < 0) throw new System.Exception("SlabAllocator cannot allocate less than 1 element");
-			if (nElements == 0) return 0;
-			int sizeIndex = CollectionHelper.Log2Ceil(nElements);
-			if (sizeIndex > MaxAllocationSizeIndex) throw new System.Exception("SlabAllocator cannot allocate more than 2^(MaxAllocationSizeIndex-1) elements");
-			return sizeIndex;
 		}
 
 		/// <summary>
@@ -265,6 +268,10 @@ namespace Pathfinding.Util {
 				AllocatorManager.Free(allocator, data);
 				data = null;
 			}
+		}
+
+		public List GetList (int allocatedIndex) {
+			return new List(this, allocatedIndex);
 		}
 
 		public ref struct List {

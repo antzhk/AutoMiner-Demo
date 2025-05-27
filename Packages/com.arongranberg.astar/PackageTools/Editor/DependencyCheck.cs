@@ -35,7 +35,7 @@ namespace Pathfinding.Util {
 				// #if !MODULE_ENTITIES
 				// new Dependency {
 				// 	name = "com.unity.entities",
-				// 	version = "1.0.0-pre.47",
+				// 	version = "1.1.0-pre.3",
 				// },
 				// #endif
 			};

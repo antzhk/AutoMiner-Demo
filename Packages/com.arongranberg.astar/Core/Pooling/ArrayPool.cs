@@ -6,7 +6,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Pooling {
 	/// <summary>
 	/// Lightweight Array Pool.
 	/// Handy class for pooling arrays of type T.
@@ -24,7 +24,7 @@ namespace Pathfinding.Util {
 	/// will likely lead to bad results.
 	///
 	/// Since: Version 3.8.6
-	/// See: Pathfinding.Util.ListPool
+	/// See: Pathfinding.Pooling.ListPool
 	/// </summary>
 	public static class ArrayPool<T> {
 #if !ASTAR_NO_POOLING

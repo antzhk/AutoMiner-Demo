@@ -116,23 +116,28 @@ namespace Pathfinding {
 		///
 		/// Once a flood fill is queued it will be done after all WorkItems have been executed.
 		///
-		/// Deprecated: Avoid using. This will force a full recalculation of the connected components. In most cases the HierarchicalGraph class takes care of things automatically behind the scenes now. In pretty much all cases you should be able to remove the call to this function.
+		/// Deprecated: You no longer need to call this method. Connectivity data is automatically kept up-to-date.
 		/// </summary>
-		[System.Obsolete("Avoid using. This will force a full recalculation of the connected components. In most cases the HierarchicalGraph class takes care of things automatically behind the scenes now. In pretty much all cases you should be able to remove the call to this function.")]
+		[System.Obsolete("You no longer need to call this method. Connectivity data is automatically kept up-to-date.")]
 		void QueueFloodFill();
 
 		/// <summary>
 		/// If a WorkItem needs to have a valid area information during execution, call this method to ensure there are no pending flood fills.
-		/// If you are using the <see cref="Pathfinding.GraphNode.Area"/> property or the <see cref="Pathfinding.PathUtilities.IsPathPossible"/> method in your work items, then you might want to call this method before you use them
+		/// If you are using the <see cref="GraphNode.Area"/> property or the <see cref="PathUtilities.IsPathPossible"/> method in your work items, then you may want to call this method before you use them,
 		/// to ensure that the data is up to date.
 		///
-		/// See: <see cref="Pathfinding.HierarchicalGraph"/>
+		/// See: <see cref="HierarchicalGraph"/>
 		///
 		/// <code>
 		/// AstarPath.active.AddWorkItem(new AstarWorkItem((IWorkItemContext ctx) => {
+		///     // Update the graph in some way
+		///     // ...
+		///
+		///     // Ensure that connectivity information is up to date.
+		///     // This will also automatically run after all work items have been executed.
 		///     ctx.EnsureValidFloodFill();
 		///
-		///     // The above call guarantees that this method has up to date information about the graph
+		///     // Use connectivity information
 		///     if (PathUtilities.IsPathPossible(someNode, someOtherNode)) {
 		///         // Do something
 		///     }
@@ -354,19 +359,21 @@ namespace Pathfinding {
 				}
 
 				if (sendEvents && anyFinished) {
-					Profiler.BeginSample("PostUpdate");
-					if (anyGraphsDirty) GraphModifier.TriggerEvent(GraphModifier.EventType.PostUpdateBeforeAreaRecalculation);
-					Profiler.EndSample();
-					astar.offMeshLinks.Refresh();
+					if (anyGraphsDirty) {
+						Profiler.BeginSample("PostUpdateBeforeAreaRecalculation");
+						GraphModifier.TriggerEvent(GraphModifier.EventType.PostUpdateBeforeAreaRecalculation);
+						Profiler.EndSample();
+					}
 
+					astar.offMeshLinks.Refresh();
 					EnsureValidFloodFill();
 
-					Profiler.BeginSample("PostUpdate");
 					if (anyGraphsDirty) {
+						Profiler.BeginSample("PostUpdate");
 						GraphModifier.TriggerEvent(GraphModifier.EventType.PostUpdate);
 						if (OnGraphsUpdated != null) OnGraphsUpdated();
+						Profiler.EndSample();
 					}
-					Profiler.EndSample();
 				}
 				if (workRemaining) return false;
 			} finally {

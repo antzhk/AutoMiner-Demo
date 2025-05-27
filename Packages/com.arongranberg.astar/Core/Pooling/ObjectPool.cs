@@ -6,7 +6,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Pooling {
 	public interface IAstarPooledObject {
 		void OnEnterPool();
 	}
@@ -24,7 +24,7 @@ namespace Pathfinding.Util {
 	///
 	/// Since: Version 3.2
 	/// Version: Since 3.7.6 this class is thread safe
-	/// See: Pathfinding.Util.ListPool
+	/// See: Pathfinding.Pooling.ListPool
 	/// See: ObjectPoolSimple
 	/// </summary>
 	public static class ObjectPool<T> where T : class, IAstarPooledObject, new(){
@@ -51,7 +51,7 @@ namespace Pathfinding.Util {
 	///
 	/// Since: Version 3.2
 	/// Version: Since 3.7.6 this class is thread safe
-	/// See: Pathfinding.Util.ListPool
+	/// See: Pathfinding.Pooling.ListPool
 	/// See: ObjectPool
 	/// </summary>
 	public static class ObjectPoolSimple<T> where T : class, new(){

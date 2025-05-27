@@ -32,7 +32,7 @@ namespace Pathfinding.Drawing {
 		///
 		/// This method will only be called in the Unity Editor.
 		///
-		/// See: \ref{Draw}
+		/// See: <see cref="Draw"/>
 		/// </summary>
 		public virtual void DrawGizmos () {
 		}

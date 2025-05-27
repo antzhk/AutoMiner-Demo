@@ -2,6 +2,7 @@
 
 using UnityEngine;
 using System.Text;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	[AddComponentMenu("Pathfinding/Pathfinding Debugger")]
@@ -288,8 +289,8 @@ namespace Pathfinding {
 						text.Append("\nSearch Speed	(nodes/ms)	").Append(searchSpeed.ToString("0")).Append(" ("+AstarPath.TotalSearchedNodes+" / ").Append(((double)AstarPath.TotalSearchTime/10000F).ToString("0")+")");
 #endif
 
-						if (Pathfinding.Util.ListPool<Vector3>.GetSize() > maxVecPool) maxVecPool = Pathfinding.Util.ListPool<Vector3>.GetSize();
-						if (Pathfinding.Util.ListPool<Pathfinding.GraphNode>.GetSize() > maxNodePool) maxNodePool = Pathfinding.Util.ListPool<Pathfinding.GraphNode>.GetSize();
+						if (Pathfinding.Pooling.ListPool<Vector3>.GetSize() > maxVecPool) maxVecPool = Pathfinding.Pooling.ListPool<Vector3>.GetSize();
+						if (Pathfinding.Pooling.ListPool<Pathfinding.GraphNode>.GetSize() > maxNodePool) maxNodePool = Pathfinding.Pooling.ListPool<Pathfinding.GraphNode>.GetSize();
 
 						text.Append("\nPool Sizes (size/total created)");
 

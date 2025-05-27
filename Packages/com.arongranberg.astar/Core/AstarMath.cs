@@ -6,7 +6,8 @@ namespace Pathfinding {
 	using Pathfinding.Util;
 	using Unity.Mathematics;
 	using Unity.Burst;
-	using Pathfinding.Graphs.Navmesh;
+	using Pathfinding.Collections;
+	using Pathfinding.Pooling;
 
 	/// <summary>Contains various spline functions.</summary>
 	public static class AstarSplines {
@@ -189,11 +190,12 @@ namespace Pathfinding {
 		/// Returned value is in the range [0,1] if the point lies on the segment otherwise it just lies on the line.
 		/// The closest point can be calculated using (end-start)*factor + start;
 		/// </summary>
-		public static float ClosestPointOnLineFactor (Int2 lineStart, Int2 lineEnd, Int2 point) {
+		public static float ClosestPointOnLineFactor (Vector2Int lineStart, Vector2Int lineEnd, Vector2Int point) {
 			var lineDirection = lineEnd - lineStart;
-			double magn = lineDirection.sqrMagnitudeLong;
+			double magn = (long)lineDirection.x*(long)lineDirection.x + (long)lineDirection.y*(long)lineDirection.y;
 
-			double closestPoint = Int2.DotLong(point - lineStart, lineDirection);
+			var dirPoint = point - lineStart;
+			double closestPoint = (long)dirPoint.x*(long)lineDirection.x + (long)dirPoint.y*(long)lineDirection.y;
 
 			if (magn != 0) closestPoint /= magn;
 
@@ -393,6 +395,14 @@ namespace Pathfinding {
 		}
 
 		/// <summary>
+		/// Signed area of a triangle multiplied by 2.
+		/// This will be negative for clockwise triangles and positive for counter-clockwise ones
+		/// </summary>
+		public static long SignedTriangleAreaTimes2 (int2 a, int2 b, int2 c) {
+			return (long)(b.x - a.x) * (long)(c.y - a.y) - (long)(c.x - a.x) * (long)(b.y - a.y);
+		}
+
+		/// <summary>
 		/// Signed area of a triangle in the XZ plane multiplied by 2.
 		/// This will be negative for clockwise triangles and positive for counter-clockwise ones
 		/// </summary>
@@ -425,6 +435,14 @@ namespace Pathfinding {
 		}
 
 		/// <summary>
+		/// Returns if p lies on the right side of the line a - b.
+		/// Does not return true if the points are colinear.
+		/// </summary>
+		public static bool Right (int2 a, int2 b, int2 p) {
+			return (long)(b.x - a.x) * (long)(p.y - a.y) - (long)(p.x - a.x) * (long)(b.y - a.y) < 0;
+		}
+
+		/// <summary>
 		/// Returns which side of the line a - b that p lies on.
 		/// Uses XZ space.
 		/// </summary>
@@ -446,7 +464,7 @@ namespace Pathfinding {
 		/// Returns if p lies on the right side of the line a - b.
 		/// Also returns true if the points are colinear.
 		/// </summary>
-		public static bool RightOrColinear (Int2 a, Int2 b, Int2 p) {
+		public static bool RightOrColinear (Vector2Int a, Vector2Int b, Vector2Int p) {
 			return (long)(b.x - a.x) * (long)(p.y - a.y) - (long)(p.x - a.x) * (long)(b.y - a.y) <= 0;
 		}
 
@@ -485,13 +503,18 @@ namespace Pathfinding {
 			return RightXZ(a, b, c);
 		}
 
+		/// <summary>Returns if the points a in a clockwise order</summary>
+		public static bool IsClockwise (int2 a, int2 b, int2 c) {
+			return Right(a, b, c);
+		}
+
 		/// <summary>Returns true if the points a in a clockwise order or if they are colinear</summary>
 		public static bool IsClockwiseOrColinearXZ (Int3 a, Int3 b, Int3 c) {
 			return RightOrColinearXZ(a, b, c);
 		}
 
 		/// <summary>Returns true if the points a in a clockwise order or if they are colinear</summary>
-		public static bool IsClockwiseOrColinear (Int2 a, Int2 b, Int2 c) {
+		public static bool IsClockwiseOrColinear (Vector2Int a, Vector2Int b, Vector2Int c) {
 			return RightOrColinear(a, b, c);
 		}
 
@@ -543,7 +566,7 @@ namespace Pathfinding {
 		/// Returns if the line segment start2 - end2 intersects the line segment start1 - end1.
 		/// If only the endpoints coincide, the result is undefined (may be true or false).
 		/// </summary>
-		public static bool SegmentsIntersect (Int2 start1, Int2 end1, Int2 start2, Int2 end2) {
+		public static bool SegmentsIntersect (Vector2Int start1, Vector2Int end1, Vector2Int start2, Vector2Int end2) {
 			return RightOrColinear(start1, end1, start2) != RightOrColinear(start1, end1, end2) && RightOrColinear(start2, end2, start1) != RightOrColinear(start2, end2, end1);
 		}
 
@@ -1305,7 +1328,7 @@ namespace Pathfinding {
 		/// Returns if the triangle ABC contains the point p.
 		/// The triangle vertices are assumed to be laid out in clockwise order.
 		/// </summary>
-		public static bool ContainsPoint (Int2 a, Int2 b, Int2 c, Int2 p) {
+		public static bool ContainsPoint (Vector2Int a, Vector2Int b, Vector2Int c, Vector2Int p) {
 			return VectorMath.IsClockwiseOrColinear(a, b, p) && VectorMath.IsClockwiseOrColinear(b, c, p) && VectorMath.IsClockwiseOrColinear(c, a, p);
 		}
 
@@ -1402,21 +1425,82 @@ namespace Pathfinding {
 			// return math.all(new bool3(check1 >= 0, check2 >= 0, check3 >= 0)) || math.all(new bool3(check1 <= 0, check2 <= 0, check3 <= 0));
 		}
 
-		/// <summary>
-		/// Sample Y coordinate of the triangle (p1, p2, p3) at the point p in XZ space.
-		/// The y coordinate of p is ignored.
-		///
-		/// Returns: The interpolated y coordinate unless the triangle is degenerate in which case a DivisionByZeroException will be thrown
-		///
-		/// See: https://en.wikipedia.org/wiki/Barycentric_coordinate_system
-		/// </summary>
-		public static int SampleYCoordinateInTriangle (Int3 p1, Int3 p2, Int3 p3, Int3 p) {
-			double det = ((double)(p2.z - p3.z)) * (p1.x - p3.x) + ((double)(p3.x - p2.x)) * (p1.z - p3.z);
+		public struct BarycentricTriangleInterpolator {
+			int2 origin;
+			double2x2 barycentricMapping;
+			double3 thresholds, linear1, linear2, linear3, ys;
 
-			double lambda1 = ((((double)(p2.z - p3.z)) * (p.x - p3.x) + ((double)(p3.x - p2.x)) * (p.z - p3.z)) / det);
-			double lambda2 = ((((double)(p3.z - p1.z)) * (p.x - p3.x) + ((double)(p1.x - p3.x)) * (p.z - p3.z)) / det);
+			public BarycentricTriangleInterpolator(Int3 p1, Int3 p2, Int3 p3) {
+				double signedTriangleArea = ((double)(p2.z - p3.z)) * (p1.x - p3.x) + ((double)(p3.x - p2.x)) * (p1.z - p3.z);
+				var d12 = new double2(p2.x - p1.x, p2.z - p1.z);
+				var d23 = new double2(p3.x - p2.x, p3.z - p2.z);
+				var d31 = new double2(p1.x - p3.x, p1.z - p3.z);
+				var l12 = math.lengthsq(d12);
+				var l23 = math.lengthsq(d23);
+				var l31 = math.lengthsq(d31);
 
-			return (int)Math.Round(lambda1 * p1.y + lambda2 * p2.y + (1 - lambda1 - lambda2) * p3.y);
+				// When interpolating a point that is very close to the edge of the triangle (or even outside it)
+				// we snap it to the edge of the triangle.
+				// This is to improve robustness when there are two adjacent triangles:
+				// If the query point is almost exactly on the edge between them, we want
+				// SampleY to return the same y coordinate for both triangles.
+				// This may not be the case if using pure barycentric interpolation.
+				// Due to precision limitations, the integer coordinates may be slightly off
+				// from the precise mathematical edge of the triangle.
+				// A value of 1 seems to work fine in practice, but we use 2 for a bit of extra margin.
+				const double MaxEdgeSnappingDistance = 2;
+				// Thresholds for the barycentric coordinates. If they are smaller than this, then the point is very close to the edge of the triangle.
+				// This follows from https://en.wikipedia.org/wiki/Barycentric_coordinate_system#Barycentric_coordinates_on_triangles
+				thresholds = math.sqrt(new double3(l12, l23, l31)) * (MaxEdgeSnappingDistance / math.abs(signedTriangleArea));
+				origin = new int2(p3.x, p3.z);
+
+				// Linear mapping from 2D space (relative to origin) to barycentric coordinates
+				barycentricMapping = new double2x2(
+					-d23.y, d23.x,
+					-d31.y, d31.x
+					) / signedTriangleArea;
+
+				ys = new double3(p1.y, p2.y, p3.y);
+
+				// Creates a mapping m(p) from 2D projective space (x,z,1) relative to the origin, to a y coordinate for the point on the line a-b that is closest to (x,z).
+				double3 ProjectPointOnLine (Int3 a, Int3 b, double lengthSq, int2 origin) {
+					// m1(p) = dot((p + origin) - a, b - a) / lengthSq;
+					// = (dot(p, b - a) + dot(origin - a, b - a)) / lengthSq;
+					var m1 = new double3(
+						b.x - a.x,
+						b.z - a.z,
+						(double)(origin.x - a.x) * (b.x - a.x) + (double)(origin.y - a.z) * (b.z - a.z)
+						) / lengthSq;
+					// m2(p) = lerp(a, b, m1(p)) = a + m1(p) * (b - a)
+					var m2 = m1 * (b.y - a.y) + new double3(0, 0, a.y);
+					return m2;
+				}
+
+				linear1 = ProjectPointOnLine(p2, p3, l23, origin);
+				linear2 = ProjectPointOnLine(p3, p1, l31, origin);
+				linear3 = ProjectPointOnLine(p1, p2, l12, origin);
+			}
+
+			public int SampleY (int2 p) {
+				p -= origin;
+
+				double2 lambdas = math.mul(this.barycentricMapping, new double2(p.x, p.y));
+				double3 lambdas2 = new double3(lambdas.x, lambdas.y, 1 - lambdas.x - lambdas.y);
+
+				if (lambdas2.x < thresholds.x) {
+					// Interpolate only along the edge p2-p3 for numerical stability
+					return (int)math.round(math.dot(linear1, new double3(p.x, p.y, 1)));
+				}
+				if (lambdas2.y < thresholds.y) {
+					// Interpolate only along the edge p3-p1 for numerical stability
+					return (int)math.round(math.dot(linear2, new double3(p.x, p.y, 1)));
+				}
+				if (lambdas2.z < thresholds.z) {
+					// Interpolate only along the edge p1-p2 for numerical stability
+					return (int)math.round(math.dot(linear3, new double3(p.x, p.y, 1)));
+				}
+				return (int)math.round(math.dot(ys, lambdas2));
+			}
 		}
 
 		/// <summary>
@@ -1428,7 +1512,7 @@ namespace Pathfinding {
 		public static Vector3[] ConvexHullXZ (Vector3[] points) {
 			if (points.Length == 0) return new Vector3[0];
 
-			var hull = Pathfinding.Util.ListPool<Vector3>.Claim();
+			var hull = Pathfinding.Pooling.ListPool<Vector3>.Claim();
 
 			int pointOnHull = 0;
 			for (int i = 1; i < points.Length; i++) if (points[i].x < points[pointOnHull].x) pointOnHull = i;
@@ -1453,7 +1537,7 @@ namespace Pathfinding {
 			var result = hull.ToArray();
 
 			// Return to pool
-			Pathfinding.Util.ListPool<Vector3>.Release(hull);
+			Pathfinding.Pooling.ListPool<Vector3>.Release(hull);
 			return result;
 		}
 
@@ -1695,6 +1779,78 @@ namespace Pathfinding {
 		/// See: 'Real Time Collision Detection' by Christer Ericson, chapter 5.1, page 141
 		/// </summary>
 		public static float3 ClosestPointOnTriangleBarycentric (float2 a, float2 b, float2 c, float2 p) {
+			// Check if p is in vertex region outside A
+			var ab = b - a;
+			var ac = c - a;
+			var ap = p - a;
+
+			var d1 = math.dot(ab, ap);
+			var d2 = math.dot(ac, ap);
+
+			// Barycentric coordinates (1,0,0)
+			if (d1 <= 0 && d2 <= 0) {
+				return new float3(1, 0, 0);
+			}
+
+			// Check if p is in vertex region outside B
+			var bp = p - b;
+			var d3 = math.dot(ab, bp);
+			var d4 = math.dot(ac, bp);
+
+			// Barycentric coordinates (0,1,0)
+			if (d3 >= 0 && d4 <= d3) {
+				return new float3(0, 1, 0);
+			}
+
+			// Check if p is in edge region outside AB, if so return a projection of p onto AB
+			var vc = d1 * d4 - d3 * d2;
+			if (d1 >= 0 && d3 <= 0 && vc <= 0) {
+				// Barycentric coordinates (1-v, v, 0)
+				var v = d1 / (d1 - d3);
+				return new float3(1-v, v, 0);
+			}
+
+			// Check if p is in vertex region outside C
+			var cp = p - c;
+			var d5 = math.dot(ab, cp);
+			var d6 = math.dot(ac, cp);
+
+			// Barycentric coordinates (0,0,1)
+			if (d6 >= 0 && d5 <= d6) {
+				return new float3(0, 0, 1);
+			}
+
+			// Check if p is in edge region of AC, if so return a projection of p onto AC
+			var vb = d5 * d2 - d1 * d6;
+			if (d2 >= 0 && d6 <= 0 && vb <= 0) {
+				// Barycentric coordinates (1-v, 0, v)
+				var v = d2 / (d2 - d6);
+				return new float3(1 - v, 0, v);
+			}
+
+			// Check if p is in edge region of BC, if so return projection of p onto BC
+			var va = d3 * d6 - d5 * d4;
+			if ((d4 - d3) >= 0 && (d5 - d6) >= 0 && va <= 0) {
+				var v = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+				return new float3(0, 1 - v, v);
+			} else {
+				// P is inside the face region. Compute the point using its barycentric coordinates (u, v, w)
+				var denom = 1f / (va + vb + vc);
+				var v = vb * denom;
+				var w = vc * denom;
+				return new float3(1 - v - w, v, w);
+
+				// This is equal to: u*a + v*b + w*c, u = va*denom = 1 - v - w;
+				// return a + ab * v + ac * w;
+			}
+		}
+
+		/// <summary>
+		/// Closest point on the triangle abc to the point p as barycentric coordinates.
+		///
+		/// See: 'Real Time Collision Detection' by Christer Ericson, chapter 5.1, page 141
+		/// </summary>
+		public static float3 ClosestPointOnTriangleBarycentric (float3 a, float3 b, float3 c, float3 p) {
 			// Check if p is in vertex region outside A
 			var ab = b - a;
 			var ac = c - a;

@@ -25,6 +25,10 @@ namespace Pathfinding.ECS {
 		public AgentMovementPlane (quaternion rotation) {
 			value = new NativeMovementPlane(rotation);
 		}
+
+		public AgentMovementPlane (NativeMovementPlane plane) {
+			value = plane;
+		}
 	}
 }
 #endif

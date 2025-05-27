@@ -183,6 +183,9 @@ namespace Pathfinding {
 		/// A point is considered on the navmesh if it is above or below a walkable navmesh surface, at any distance,
 		/// and if it is not above/below a closer unwalkable node.
 		///
+		/// Note: This means that, for example, in multi-story building a point will be considered on the navmesh if any walkable floor is below or above the point.
+		/// If you want more complex behavior then you can use the GetNearest method together with the appropriate <see cref="NNConstraint.distanceMetric"/> settings for your use case.
+		///
 		/// This uses the graph's natural up direction to determine which way is up.
 		/// Therefore, it will also work on rotated graphs, as well as graphs in 2D mode.
 		///
@@ -269,6 +272,7 @@ namespace Pathfinding {
 		/// happens for other - less extreme - values as well, but to a lesser degree.
 		/// </summary>
 		public virtual void RelocateNodes (Matrix4x4 deltaMatrix) {
+			AssertSafeToUpdateGraph();
 			GetNodes(node => node.position = ((Int3)deltaMatrix.MultiplyPoint((Vector3)node.position)));
 		}
 
@@ -349,6 +353,46 @@ namespace Pathfinding {
 		[System.Obsolete("Use GetNearest instead")]
 		public NNInfo GetNearestForce (Vector3 position, NNConstraint constraint) {
 			return GetNearest(position, constraint);
+		}
+
+		/// <summary>
+		/// A random point on the graph.
+		///
+		/// If there are no suitable nodes in the graph, <see cref="NNInfo.Empty"/> will be returned.
+		///
+		/// <code>
+		/// // Pick a random walkable point on the graph, sampled uniformly over the graph's surface
+		/// var sample = AstarPath.active.graphs[0].RandomPointOnSurface(NNConstraint.Walkable);
+		///
+		/// // Use a random point on the surface of the node as the destination.
+		/// var destination1 = sample.position;
+		/// // Or use the center of the node as the destination
+		/// var destination2 = (Vector3)sample.node.position;
+		/// </code>
+		///
+		/// See: <see cref="GraphNode.RandomPointOnSurface"/>
+		/// See: <see cref="PathUtilities.GetPointsOnNodes"/>
+		/// See: wander (view in online documentation for working links)
+		/// </summary>
+		/// <param name="nnConstraint">Optionally set to constrain which nodes are allowed to be returned. If null, all nodes are allowed, including unwalkable ones.</param>
+		/// <param name="highQuality">If true, this method is allowed to be more computationally heavy, in order to pick a random point more uniformly (based on the nodes' surface area).
+		///        If false, this method should be fast as possible, but the distribution of sampled points may be a bit skewed. This setting only affects recast and navmesh graphs.</param>
+		public virtual NNInfo RandomPointOnSurface (NNConstraint nnConstraint, bool highQuality = true) {
+			// Use reservoir sampling to pick a random node
+			GraphNode bestNode = null;
+			var weight = 0f;
+			GetNodes(node => {
+				if (nnConstraint == null || nnConstraint.Suitable(node)) {
+					var w = node.SurfaceArea();
+					// Make sure the code works even for nodes that have zero surface area (like point nodes)
+					if (w <= 0) w = 0.001f;
+					weight += w;
+					if (bestNode == null || Random.value < w / weight) {
+						bestNode = node;
+					}
+				}
+			});
+			return bestNode != null ? new NNInfo(bestNode, bestNode.RandomPointOnSurface(), 0) : NNInfo.Empty;
 		}
 
 		/// <summary>
@@ -455,7 +499,9 @@ namespace Pathfinding {
 			// Update the gizmo mesh if necessary
 			if (!gizmos.Draw(hasher, redrawScope)) {
 				using (var helper = GraphGizmoHelper.GetGizmoHelper(gizmos, active, hasher, redrawScope)) {
+					if (helper.showSearchTree) helper.builder.PushLineWidth(2);
 					GetNodes((System.Action<GraphNode>)helper.DrawConnections);
+					if (helper.showSearchTree) helper.builder.PopLineWidth();
 				}
 			}
 

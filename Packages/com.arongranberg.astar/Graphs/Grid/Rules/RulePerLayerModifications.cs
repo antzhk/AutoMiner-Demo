@@ -6,6 +6,9 @@ namespace Pathfinding.Graphs.Grid.Rules {
 	///
 	/// You can for example make all surfaces with a specific layer make the nodes get a specific tag.
 	///
+	/// This uses the information from the height testing system to determine which layer the surface is on.
+	/// As a consequence, this rule does not do anything when using 2D physics, or height testing is disabled on the grid graph.
+	///
 	/// [Open online documentation to see images]
 	///
 	/// See: grid-rules (view in online documentation for working links)

@@ -42,6 +42,8 @@ namespace Pathfinding.ECS {
 		/// The index of the hierarchical node that the agent is currently in.
 		/// Will be -1 if the hierarchical node index is not known.
 		/// See: <see cref="HierarchicalGraph"/>
+		///
+		/// See: <see cref="MovementState.hierarchicalNodeIndex"/>
 		/// </summary>
 		public int hierarchicalNodeIndex;
 

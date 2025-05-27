@@ -96,7 +96,7 @@ namespace Pathfinding.Drawing {
 
 
 
-		/// <summary>\copydocref{CommandBuilder.Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{CommandBuilder.Polyline(List<Vector3>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector3> points, bool cycle = false) {
 			draw.Polyline(points, cycle);
@@ -111,7 +111,7 @@ namespace Pathfinding.Drawing {
 		public void Polyline (float3[] points, bool cycle = false) {
 			draw.Polyline(points, cycle);
 		}
-		/// <summary>\copydocref{CommandBuilder.Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{CommandBuilder.Polyline(NativeArray<float3>,bool)}</summary>
 		public void Polyline (NativeArray<float3> points, bool cycle = false) {
 			draw.Polyline(points, cycle);
 		}
@@ -244,12 +244,12 @@ namespace Pathfinding.Drawing {
 
 
 
-		/// <summary>\copydocref{Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector3>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector3> points, bool cycle, Color color) {
 			draw.Polyline(points, cycle, color);
 		}
-		/// <summary>\copydocref{Polyline(List&lt;Vector3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector3>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector3> points, Color color) {
 			Polyline(points, false, color);
@@ -274,11 +274,11 @@ namespace Pathfinding.Drawing {
 		public void Polyline (float3[] points, Color color) {
 			Polyline(points, false, color);
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float3>,bool)}</summary>
 		public void Polyline (NativeArray<float3> points, bool cycle, Color color) {
 			draw.Polyline(points, cycle, color);
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float3&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float3>,bool)}</summary>
 		public void Polyline (NativeArray<float3> points, Color color) {
 			Polyline(points, false, color);
 		}
@@ -486,7 +486,7 @@ namespace Pathfinding.Drawing {
 			}
 			draw.PopColor();
 		}
-		/// <summary>\copydocref{Polyline(List&lt;Vector2&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector2>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector2> points, bool cycle, Color color) {
 			draw.PushColor(color);
@@ -496,7 +496,7 @@ namespace Pathfinding.Drawing {
 			if (cycle && points.Count > 1) Line(points[points.Count - 1], points[0]);
 			draw.PopColor();
 		}
-		/// <summary>\copydocref{Polyline(List&lt;Vector2&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(List<Vector2>,bool)}</summary>
 		[BurstDiscard]
 		public void Polyline (List<Vector2> points, Color color) {
 			Polyline(points, false, color);
@@ -531,7 +531,7 @@ namespace Pathfinding.Drawing {
 		public void Polyline (float2[] points, Color color) {
 			Polyline(points, false, color);
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float2&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float2>,bool)}</summary>
 		public void Polyline (NativeArray<float2> points, bool cycle, Color color) {
 			draw.PushColor(color);
 			for (int i = 0; i < points.Length - 1; i++) {
@@ -540,7 +540,7 @@ namespace Pathfinding.Drawing {
 			if (cycle && points.Length > 1) Line(points[points.Length - 1], points[0]);
 			draw.PopColor();
 		}
-		/// <summary>\copydocref{Polyline(NativeArray&lt;float2&gt;,bool)}</summary>
+		/// <summary>\copydocref{Polyline(NativeArray<float2>,bool)}</summary>
 		public void Polyline (NativeArray<float2> points, Color color) {
 			Polyline(points, false, color);
 		}

@@ -4,6 +4,8 @@ using UnityEngine;
 using Pathfinding.RVO;
 using Pathfinding.ECS;
 using System.Linq;
+using Unity.Entities;
+using Pathfinding.ECS.RVO;
 
 namespace Pathfinding {
 	[CustomEditor(typeof(FollowerEntity), true)]
@@ -11,6 +13,7 @@ namespace Pathfinding {
 	public class FollowerEntityEditor : EditorBase {
 		bool debug = false;
 		bool tagPenaltiesOpen;
+		bool legend = false;
 
 		protected override void OnDisable () {
 			base.OnDisable();
@@ -33,7 +36,7 @@ namespace Pathfinding {
 		protected void AutoRepathInspector () {
 			var mode = FindProperty("autoRepathBacking.mode");
 
-			PropertyField(mode, "Recalculate paths automatically");
+			PropertyField(mode, "Recalculate Paths Automatically");
 			if (!mode.hasMultipleDifferentValues) {
 				var modeValue = (AutoRepathPolicy.Mode)mode.enumValueIndex;
 				EditorGUI.indentLevel++;
@@ -60,7 +63,10 @@ namespace Pathfinding {
 					EditorGUILayout.Toggle("Has Path", ai.hasPath);
 					EditorGUILayout.Toggle("Path Pending", ai.pathPending);
 					if (ai.isTraversingOffMeshLink) {
-						EditorGUILayout.Toggle("Traversing off-mesh link", true);
+						EditorGUILayout.Toggle("Traversing Off-Mesh Link", true);
+					}
+					if (ai.isStopped) {
+						EditorGUILayout.Toggle("IsStopped (user controlled)", ai.isStopped);
 					}
 					EditorGUI.EndDisabledGroup();
 
@@ -68,7 +74,7 @@ namespace Pathfinding {
 					if (ai.entityExists) ai.destination = newDestination;
 
 					EditorGUI.BeginDisabledGroup(true);
-					EditorGUILayout.LabelField("Remaining distance", ai.remainingDistance.ToString("0.00"));
+					EditorGUILayout.LabelField("Remaining Distance", ai.remainingDistance.ToString("0.00"));
 					EditorGUILayout.LabelField("Speed", ai.velocity.magnitude.ToString("0.00"));
 				} else {
 					int nReachedDestination = 0;
@@ -85,6 +91,28 @@ namespace Pathfinding {
 					EditorGUILayout.LabelField("Path Pending", nPending + " of " + targets.Length);
 				}
 				EditorGUI.EndDisabledGroup();
+
+				legend = EditorGUILayout.Foldout(legend, "Debug rendering legend");
+				if (legend) {
+					EditorGUI.indentLevel++;
+					EditorGUI.BeginDisabledGroup(true);
+					Section("General");
+					EditorGUILayout.ColorField("Destination", Color.blue);
+					EditorGUILayout.ColorField("Path", JobDrawFollowerGizmos.Path);
+
+					var debugRendering = (Pathfinding.PID.PIDMovement.DebugFlags)FindProperty("movement.debugFlags").intValue;
+					if ((debugRendering & PID.PIDMovement.DebugFlags.Rotation) != 0) {
+						Section("Rotation");
+						EditorGUILayout.ColorField("Visual Rotation", JobDrawFollowerGizmos.VisualRotationColor);
+						EditorGUILayout.ColorField("Unsmoothed Rotation", JobDrawFollowerGizmos.UnsmoothedRotation);
+						EditorGUILayout.ColorField("Internal Rotation", JobDrawFollowerGizmos.InternalRotation);
+						EditorGUILayout.ColorField("Target Internal Rotation", JobDrawFollowerGizmos.TargetInternalRotation);
+						EditorGUILayout.ColorField("Target Internal Rotation Hint", JobDrawFollowerGizmos.TargetInternalRotationHint);
+						EditorGUI.EndDisabledGroup();
+						EditorGUI.indentLevel--;
+					}
+				}
+
 				EditorGUI.indentLevel--;
 			}
 		}
@@ -116,6 +144,8 @@ namespace Pathfinding {
 			FloatField("shape.radius", min: 0.01f);
 			FloatField("shape.height", min: 0.01f);
 			Popup("orientationBacking", new [] { new GUIContent("ZAxisForward (for 3D games)"), new GUIContent("YAxisForward (for 2D games)") }, "Orientation");
+			var orientationProperty = FindProperty("orientationBacking");
+			bool is2D = (OrientationMode)orientationProperty.enumValueIndex == OrientationMode.YAxisForward;
 
 			Section("Movement");
 			FloatField("movement.follower.speed", min: 0f);
@@ -135,7 +165,7 @@ namespace Pathfinding {
 			FloatField("movement.follower.leadInRadiusWhenApproachingDestination", min: 0f);
 			FloatField("movement.follower.desiredWallDistance", min: 0f);
 
-			if (PropertyField("managedState.enableGravity", "Gravity")) {
+			if (!is2D && PropertyField("managedState.enableGravity", "Gravity")) {
 				EditorGUI.indentLevel++;
 				PropertyField("movement.groundMask", "Raycast Ground Mask");
 				EditorGUI.indentLevel--;
@@ -143,7 +173,7 @@ namespace Pathfinding {
 			var movementPlaneSource = FindProperty("movementPlaneSourceBacking");
 			PropertyField(movementPlaneSource, "Movement Plane Source");
 			if (AstarPath.active != null && AstarPath.active.data.graphs != null) {
-				var possiblySpherical = AstarPath.active.data.navmesh != null && !AstarPath.active.data.navmesh.RecalculateNormals;
+				var possiblySpherical = AstarPath.active.data.navmeshGraph != null && !AstarPath.active.data.navmeshGraph.RecalculateNormals;
 				if (!possiblySpherical && !movementPlaneSource.hasMultipleDifferentValues && (MovementPlaneSource)movementPlaneSource.intValue == MovementPlaneSource.Raycast) {
 					EditorGUILayout.HelpBox("Using raycasts as the movement plane source is only recommended if you have a spherical or otherwise non-planar world. It has a performance overhead.", MessageType.Info);
 				}
@@ -151,6 +181,9 @@ namespace Pathfinding {
 					EditorGUILayout.HelpBox("Using the navmesh normal as the movement plane source is only recommended if you have a spherical or otherwise non-planar world. It has a performance overhead.", MessageType.Info);
 				}
 			}
+
+			this.Popup("syncPosition", new [] { new GUIContent("Move independently of transform"), new GUIContent("Move agent with transform") }, "Position Sync");
+			this.Popup("syncRotation", new [] { new GUIContent("Rotate independently of transform"), new GUIContent("Rotate agent with transform") }, "Rotation Sync");
 
 			Section("Pathfinding");
 			PathfindingSettingsInspector();
@@ -169,6 +202,21 @@ namespace Pathfinding {
 				PropertyField("managedState.rvoSettings.collidesWith");
 				Slider("managedState.rvoSettings.priority", left: 0f, right: 1.0f);
 				PropertyField("managedState.rvoSettings.locked");
+
+				if (targets.Length == 1) {
+					var ai = target as FollowerEntity;
+					var simulator = RVOSimulator.active?.GetSimulator();
+					if (simulator != null && ai.entityExists && World.DefaultGameObjectInjectionWorld.EntityManager.HasComponent<AgentIndex>(ai.entity)) {
+						var agentIndex = World.DefaultGameObjectInjectionWorld.EntityManager.GetComponentData<AgentIndex>(ai.entity);
+						simulator.BlockUntilSimulationStepDone();
+						if (agentIndex.TryGetIndex(ref simulator.simulationData, out var index)) {
+							if (simulator.outputData.numNeighbours[index] >= simulator.simulationData.maxNeighbours[index]) {
+								EditorGUILayout.HelpBox("Limit of how many neighbours to consider (Max Neighbours) has been reached. Some nearby agents may have been ignored. " +
+									"To ensure all agents are taken into account you can raise the 'Max Neighbours' value at a cost to performance.", MessageType.Warning);
+							}
+						}
+					}
+				}
 			}
 
 			Section("Debug");
@@ -213,7 +261,7 @@ namespace Pathfinding {
 					EditorGUILayout.HelpBox("Installing entities package...", MessageType.None);
 				}
 			} else {
-				EditorGUILayout.HelpBox("This component requires the Entities package to be installed. Please install it using the Package Manager.", MessageType.Error);
+				EditorGUILayout.HelpBox("This component requires the Entities package (1.1.0+) to be installed. Please install it using the Package Manager.", MessageType.Error);
 				if (GUILayout.Button("Install entities package")) {
 					addRequest = Client.Add("com.unity.entities");
 				}

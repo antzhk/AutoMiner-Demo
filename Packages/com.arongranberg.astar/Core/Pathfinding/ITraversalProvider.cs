@@ -1,3 +1,4 @@
+using UnityEngine;
 namespace Pathfinding {
 	/// <summary>
 	/// Provides additional traversal information to a path request.

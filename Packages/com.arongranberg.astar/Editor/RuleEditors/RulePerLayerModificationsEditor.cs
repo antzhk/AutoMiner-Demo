@@ -15,7 +15,7 @@ namespace Pathfinding {
 				target.layerRules[i].layer = EditorGUILayout.LayerField((int)target.layerRules[i].layer);
 				target.layerRules[i].action = (RulePerLayerModifications.RuleAction)EditorGUILayout.EnumPopup(target.layerRules[i].action);
 				if (target.layerRules[i].action == RulePerLayerModifications.RuleAction.SetTag) {
-					target.layerRules[i].tag = Pathfinding.Util.EditorGUILayoutHelper.TagField(new GUIContent(""), target.layerRules[i].tag, AstarPathEditor.EditTags);
+					target.layerRules[i].tag = Pathfinding.Util.EditorGUILayoutHelper.TagField(target.layerRules[i].tag, AstarPathEditor.EditTags);
 				} else {
 					EditorGUILayout.LabelField("");
 				}

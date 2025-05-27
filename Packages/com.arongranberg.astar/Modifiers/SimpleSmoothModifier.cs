@@ -1,7 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
-
-using Pathfinding.Util;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	[AddComponentMenu("Pathfinding/Modifiers/Simple Smooth Modifier")]

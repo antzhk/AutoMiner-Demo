@@ -1,10 +1,10 @@
 namespace Pathfinding {
 	using Pathfinding.Util;
-	using Pathfinding.Graphs.Util;
+	using Pathfinding.Collections;
 	using UnityEngine;
 	using System.Collections.Generic;
 
-	/// <summary>Base class for the NavmeshCut and NavmeshAdd components</summary>
+	/// <summary>Base class for the <see cref="NavmeshCut"/> and <see cref="NavmeshAdd"/> components</summary>
 	[ExecuteAlways]
 	public abstract class NavmeshClipper : VersionedMonoBehaviour {
 		/// <summary>Called every time a NavmeshCut/NavmeshAdd component is enabled.</summary>
@@ -29,6 +29,32 @@ namespace Pathfinding {
 		/// </summary>
 		public GraphMask graphMask = GraphMask.everything;
 
+		/// <summary>
+		/// Ensures that the list of enabled clippers is up to date.
+		///
+		/// This is useful when loading the scene, and some components may be enabled, but Unity has not yet called their OnEnable method.
+		///
+		/// See: <see cref="allEnabled"/>
+		/// </summary>
+		internal static void RefreshEnabledList () {
+			var allModifiers = UnityCompatibility.FindObjectsByTypeUnsorted<NavmeshClipper>();
+
+			for (int i = 0; i < allModifiers.Length; i++) {
+				if (allModifiers[i].enabled && allModifiers[i].listIndex == -1) {
+					// The modifier is not yet registered. Presumably it is enabled,
+					// but unity hasn't had time to call OnEnable yet.
+					// Disabling it and enabling it will force unity to call OnEnable immediately.
+					// We don't want to call it ourselves, because then Unity won't know that it has been called,
+					// which could cause issues for lifecycle management.
+					// For example, if we called OnEnable manually (before Unity did), and then the object was destroyed
+					// before Unity had a chance to call OnEnable, then Unity would not call OnDisable.
+					// Warning: This may cause Unity to call OnEnable more than once.
+					allModifiers[i].enabled = false;
+					allModifiers[i].enabled = true;
+				}
+			}
+		}
+
 		public static void AddEnableCallback (System.Action<NavmeshClipper> onEnable,  System.Action<NavmeshClipper> onDisable) {
 			OnEnableCallback += onEnable;
 			OnDisableCallback += onDisable;
@@ -47,7 +73,17 @@ namespace Pathfinding {
 		public static List<NavmeshClipper> allEnabled { get { return all; } }
 
 		protected virtual void OnEnable () {
-			if (!Application.isPlaying) return;
+			if (listIndex != -1) {
+				// Unity is terrible and can actually call OnEnable more than once in some rare situations.
+				// So we have to guard for this.
+				// Specifically:
+				// 1. At the start of the game, the cutter may have .enabled=true, but OnEnable might not have been called yet.
+				// 2. If you from another OnEnable function call 'cutter.enabled = false; cutter.enabled = true', then OnEnable will
+				//    get called.
+				// 3. Unity may call cutter.OnEnable later in the same frame, even though it was already done.
+				// This may get triggered by the RefreshEnabledList method.
+				return;
+			}
 
 			if (OnEnableCallback != null) OnEnableCallback(this);
 			listIndex = all.Count;
@@ -55,7 +91,7 @@ namespace Pathfinding {
 		}
 
 		protected virtual void OnDisable () {
-			if (!Application.isPlaying) return;
+			if (listIndex == -1) return;
 
 			// Efficient removal (the list doesn't need to be ordered).
 			// Move the last item in the list to the slot occupied by this item
@@ -67,7 +103,7 @@ namespace Pathfinding {
 			if (OnDisableCallback != null) OnDisableCallback(this);
 		}
 
-		internal abstract void NotifyUpdated(GridLookup<NavmeshClipper>.Root previousState);
+		public abstract void NotifyUpdated(GridLookup<NavmeshClipper>.Root previousState);
 		public abstract Rect GetBounds(GraphTransform transform, float radiusMargin);
 		public abstract bool RequiresUpdate(GridLookup<NavmeshClipper>.Root previousState);
 		public abstract void ForceUpdate();

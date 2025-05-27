@@ -13,9 +13,57 @@ namespace Pathfinding {
 	/// That's where this graph type comes in. It supports basically the same stuff as the grid graph, but also multiple layers.
 	/// It uses a bit more memory than a regular grid graph, but is otherwise equivalent.
 	///
+	/// See: get-started-grid (view in online documentation for working links)
+	/// See: graphTypes (view in online documentation for working links)
+	///
+	/// \section layergridgraph-inspector Inspector
 	/// [Open online documentation to see images]
 	///
-	/// Note: The graph supports 16 layers by default, but it can be increased to 256 by enabling the ASTAR_LEVELGRIDNODE_MORE_LAYERS option in the A* Inspector -> Settings -> Optimizations tab.
+	/// \inspectorField{Shape, inspectorGridMode}
+	/// \inspectorField{2D, is2D}
+	/// \inspectorField{Align  to tilemap, AlignToTilemap}
+	/// \inspectorField{Width, width}
+	/// \inspectorField{Depth, depth}
+	/// \inspectorField{Node size, nodeSize}
+	/// \inspectorField{Aspect ratio (isometric/advanced shape), aspectRatio}
+	/// \inspectorField{Isometric angle (isometric/advanced shape), isometricAngle}
+	/// \inspectorField{Center, center}
+	/// \inspectorField{Rotation, rotation}
+	/// \inspectorField{Connections, neighbours}
+	/// \inspectorField{Cut corners, cutCorners}
+	/// \inspectorField{Max step height, maxStepHeight}
+	/// \inspectorField{Account for slopes, maxStepUsesSlope}
+	/// \inspectorField{Max slope, maxSlope}
+	/// \inspectorField{Erosion iterations, erodeIterations}
+	/// \inspectorField{Erosion → Erosion Uses Tags, erosionUseTags}
+	/// \inspectorField{Use 2D physics, collision.use2D}
+	///
+	/// <b>Collision testing</b>
+	/// \inspectorField{Enable Collision Testing, collision.collisionCheck}
+	/// \inspectorField{Collider type, collision.type}
+	/// \inspectorField{Diameter, collision.diameter}
+	/// \inspectorField{Height/length, collision.height}
+	/// \inspectorField{Offset, collision.collisionOffset}
+	/// \inspectorField{Obstacle layer mask, collision.mask}
+	/// \inspectorField{Preview, GridGraphEditor.collisionPreviewOpen}
+	///
+	/// <b>Height testing</b>
+	/// \inspectorField{Enable Height Testing, collision.heightCheck}
+	/// \inspectorField{Ray length, collision.fromHeight}
+	/// \inspectorField{Mask, collision.heightMask}
+	/// \inspectorField{Thick raycast, collision.thickRaycast}
+	/// \inspectorField{Unwalkable when no ground, collision.unwalkableWhenNoGround}
+	///
+	/// <b>Rules</b>
+	/// Take a look at grid-rules (view in online documentation for working links) for a list of available rules.
+	///
+	/// <b>Other settings</b>
+	/// \inspectorField{Show surface, showMeshSurface}
+	/// \inspectorField{Show outline, showMeshOutline}
+	/// \inspectorField{Show connections, showNodeConnections}
+	/// \inspectorField{Initial penalty, NavGraph.initialPenalty}
+	///
+	/// Note: The graph supports 16 layers by default, but it can be increased to 256 by enabling the ASTAR_LEVELGRIDNODE_MORE_LAYERS option in the A* Inspector → Settings → Optimizations tab.
 	///
 	/// See: <see cref="GridGraph"/>
 	/// </summary>

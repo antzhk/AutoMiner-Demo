@@ -1,6 +1,7 @@
 using System.Collections.Generic;
+using UnityEngine;
 
-namespace Pathfinding.Graphs.Util {
+namespace Pathfinding.Collections {
 	/// <summary>
 	/// Holds a lookup datastructure to quickly find objects inside rectangles.
 	/// Objects of type T occupy an integer rectangle in the grid and they can be
@@ -13,7 +14,7 @@ namespace Pathfinding.Graphs.Util {
 	/// (inclusive) and one at <see cref="size"/> (exclusive) that is specified in the constructor.
 	/// </summary>
 	public class GridLookup<T> where T : class {
-		Int2 size;
+		Vector2Int size;
 		Item[] cells;
 		/// <summary>
 		/// Linked list of all items.
@@ -23,7 +24,7 @@ namespace Pathfinding.Graphs.Util {
 		Dictionary<T, Root> rootLookup = new Dictionary<T, Root>();
 		Stack<Item> itemPool = new Stack<Item>();
 
-		public GridLookup (Int2 size) {
+		public GridLookup (Vector2Int size) {
 			this.size = size;
 			cells = new Item[size.x*size.y];
 			for (int i = 0; i < cells.Length; i++) cells[i] = new Item();
@@ -157,10 +158,10 @@ namespace Pathfinding.Graphs.Util {
 
 		/// <summary>
 		/// Returns all objects of a specific type inside the cells marked by the rectangle.
-		/// Note: For better memory usage, consider pooling the list using Pathfinding.Util.ListPool after you are done with it
+		/// Note: For better memory usage, consider pooling the list using Pathfinding.Pooling.ListPool after you are done with it
 		/// </summary>
 		public List<U> QueryRect<U>(IntRect r) where U : class, T {
-			List<U> result = Pathfinding.Util.ListPool<U>.Claim();
+			List<U> result = Pathfinding.Pooling.ListPool<U>.Claim();
 
 			// Loop through tiles and check which objects are inside them
 			for (int z = r.ymin; z <= r.ymax; z++) {
@@ -206,10 +207,10 @@ namespace Pathfinding.Graphs.Util {
 			for (int i = 0; i < newCells.Length; i++) {
 				if (newCells[i] == null) newCells[i] = new Item();
 			}
-			this.size = new Int2(newBounds.Width, newBounds.Height);
+			this.size = new Vector2Int(newBounds.Width, newBounds.Height);
 			this.cells = newCells;
 			var root = this.AllItems;
-			var offset = new Int2(-newBounds.xmin, -newBounds.ymin);
+			var offset = new Vector2Int(-newBounds.xmin, -newBounds.ymin);
 			var bounds = new IntRect(0, 0, newBounds.Width - 1, newBounds.Height - 1);
 			while (root != null) {
 				root.previousBounds = IntRect.Intersection(root.previousBounds.Offset(offset), bounds);

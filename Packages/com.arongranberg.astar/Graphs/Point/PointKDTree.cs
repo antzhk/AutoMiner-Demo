@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 
 	/// <summary>
 	/// Represents a collection of GraphNodes.
@@ -53,6 +53,12 @@ namespace Pathfinding {
 		public void Add (GraphNode node) {
 			numNodes++;
 			Add(node, 1);
+		}
+
+		public void Remove (GraphNode node) {
+			if (!Remove(node, 1)) {
+				throw new System.ArgumentException("The node is not in the lookup tree. Has it been moved?");
+			}
 		}
 
 		/// <summary>Rebuild the tree starting with all nodes in the array between index start (inclusive) and end (exclusive)</summary>
@@ -141,8 +147,11 @@ namespace Pathfinding {
 
 				nodes.Sort(start, end - start, comparers[axis]);
 				int mid = (start+end)/2;
-				tree[index].split = (nodes[mid-1].position[axis] + nodes[mid].position[axis] + 1)/2;
+				tree[index].split = (nodes[mid-1].position[axis] + nodes[mid].position[axis])/2;
 				tree[index].splitAxis = (byte)axis;
+				// Note: Nodes exactly on the splitting plane may end up in either child.
+				// Leaf nodes have a max number of children, so this must be possible
+				// in degenerate cases (if, for example, many points are at the same location).
 				Build(index*2 + 0, nodes, start, mid);
 				Build(index*2 + 1, nodes, mid, end);
 			}
@@ -171,6 +180,39 @@ namespace Pathfinding {
 
 				Rebalance(index >> levelsUp);
 			}
+		}
+
+		bool Remove (GraphNode point, int index, int depth = 0) {
+			var pos = point.position;
+			while (tree[index].data == null) {
+				var coord = pos[tree[index].splitAxis];
+				if (coord == tree[index].split) {
+					// Edge case where the point is exactly on the splitting plane
+					// We need to recurse into both sides.
+					// Leaf nodes have a max number of children, so this will always be possible
+					// in degenerate cases (if, for example, many points are at the same location).
+					if (Remove(point, 2 * index, depth + 1)) return true;
+					return Remove(point, 2 * index + 1, depth + 1);
+				} else {
+					index = 2 * index + (coord < tree[index].split ? 0 : 1);
+					depth++;
+				}
+			}
+
+			var idx = System.Array.IndexOf(tree[index].data, point);
+			if (idx == -1) return false;
+			// Swap with last element
+			var treeNode = tree[index];
+			treeNode.count--;
+			treeNode.data[idx] = treeNode.data[treeNode.count];
+			treeNode.data[treeNode.count] = null;
+			tree[index] = treeNode;
+			numNodes--;
+
+			if (treeNode.count == 0 && index != 1) {
+				Rebalance(index >> 1);
+			}
+			return true;
 		}
 
 		/// <summary>Closest node to the point which satisfies the constraint and is at most at the given distance</summary>

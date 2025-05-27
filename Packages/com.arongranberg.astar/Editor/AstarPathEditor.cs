@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
-using System.Reflection;
 using Pathfinding.Graphs.Util;
 using Pathfinding.Util;
 
@@ -15,16 +14,12 @@ namespace Pathfinding {
 		/// Holds node counts for each graph to avoid calculating it every frame.
 		/// Only used for visualization purposes
 		/// </summary>
-		static Dictionary<NavGraph, KeyValuePair<float, KeyValuePair<int, int> > > graphNodeCounts;
+		static Dictionary<NavGraph, (float, int, int)> graphNodeCounts;
 
-		/// <summary>List of all graph editors for the graphs</summary>
+		/// <summary>List of all graph editors for the graphs. May be larger than script.data.graphs.Length</summary>
 		GraphEditor[] graphEditors;
 
-		System.Type[] graphTypes {
-			get {
-				return script.data.graphTypes;
-			}
-		}
+		System.Type[] graphTypes => AstarData.graphTypes;
 
 		static int lastUndoGroup = -1000;
 
@@ -35,20 +30,13 @@ namespace Pathfinding {
 
 		#region SectionFlags
 
-		static bool showSettings;
-		static bool customAreaColorsOpen;
-		static bool editTags;
+		static bool showSettings, showCustomAreaColors, showTagNames;
 
-		FadeArea settingsArea;
-		FadeArea colorSettingsArea;
-		FadeArea editorSettingsArea;
-		FadeArea aboutArea;
-		FadeArea optimizationSettingsArea;
-		FadeArea serializationSettingsArea;
-		FadeArea tagsArea;
-		FadeArea graphsArea;
-		FadeArea addGraphsArea;
-		FadeArea alwaysVisibleArea;
+		FadeArea settingsArea, colorSettingsArea, editorSettingsArea, aboutArea, optimizationSettingsArea, serializationSettingsArea;
+		FadeArea tagsArea, graphsArea, addGraphsArea, alwaysVisibleArea;
+
+		/// <summary>Graph editor which has its 'name' field focused</summary>
+		GraphEditor graphNameFocused;
 
 		#endregion
 
@@ -64,7 +52,7 @@ namespace Pathfinding {
 		static GUIStyle level0AreaStyle, level0LabelStyle;
 		static GUIStyle level1AreaStyle, level1LabelStyle;
 
-		static GUIStyle graphDeleteButtonStyle, graphInfoButtonStyle, graphGizmoButtonStyle, graphEditNameButtonStyle;
+		static GUIStyle graphDeleteButtonStyle, graphInfoButtonStyle, graphGizmoButtonStyle, graphEditNameButtonStyle, graphDuplicateButtonStyle;
 
 		public static GUIStyle helpBox  { get; private set; }
 		public static GUIStyle thinHelpBox  { get; private set; }
@@ -80,27 +68,19 @@ namespace Pathfinding {
 			isPrefab = PrefabUtility.IsPartOfPrefabAsset(script);
 
 			// Make sure all references are set up to avoid NullReferenceExceptions
-			script.ConfigureReferencesInternal();
+			script.colorSettings.PushToStatic();
 
 			if (!isPrefab) HideToolsWhileActive();
 
 			Undo.undoRedoPerformed += OnUndoRedoPerformed;
 
-			// Search the assembly for graph types and graph editors
-			if (graphEditorTypes == null || graphEditorTypes.Count == 0)
-				FindGraphTypes();
-
-			try {
-				GetAstarEditorSettings();
-			} catch (System.Exception e) {
-				Debug.LogException(e);
-			}
-
+			FindGraphTypes();
+			GetAstarEditorSettings();
 			LoadStyles();
 
 			// Load graphs only when not playing, or in extreme cases, when data.graphs is null
-			if ((!Application.isPlaying && (script.data == null || script.data.graphs == null || script.data.graphs.Length == 0)) || script.data.graphs == null) {
-				LoadGraphs();
+			if ((!Application.isPlaying && (script.data.graphs == null || script.data.graphs.Length == 0)) || script.data.graphs == null) {
+				DeserializeGraphs();
 			}
 
 			CreateFadeAreas();
@@ -161,7 +141,7 @@ namespace Pathfinding {
 				colorSettingsArea         = new FadeArea(false, this, level1AreaStyle, level1LabelStyle);
 				editorSettingsArea        = new FadeArea(false, this, level1AreaStyle, level1LabelStyle);
 				alwaysVisibleArea         = new FadeArea(true, this, level1AreaStyle, level1LabelStyle);
-				tagsArea                  = new FadeArea(editTags, this, level1AreaStyle, level1LabelStyle);
+				tagsArea                  = new FadeArea(showTagNames, this, level1AreaStyle, level1LabelStyle);
 			}
 		}
 
@@ -181,10 +161,6 @@ namespace Pathfinding {
 			EditorPrefs.SetBool("EditorGUILayoutx.fancyEffects", FadeArea.fancyEffects);
 		}
 
-		/// <summary>
-		/// Repaints Scene View.
-		/// Warning: Uses Undocumented Unity Calls (should be safe for Unity 3.x though)
-		/// </summary>
 		void RepaintSceneView () {
 			if (!Application.isPlaying || EditorApplication.isPaused) SceneView.RepaintAll();
 		}
@@ -195,7 +171,6 @@ namespace Pathfinding {
 		}
 
 		public override void OnInspectorGUI () {
-			// Do some loading and checking
 			if (!LoadStyles()) {
 				EditorGUILayout.HelpBox("The GUISkin 'AstarEditorSkin.guiskin' in the folder "+EditorResourceHelper.editorAssets+"/ was not found or some custom styles in it does not exist.\n"+
 					"This file is required for the A* Pathfinding Project editor.\n\n"+
@@ -216,8 +191,6 @@ namespace Pathfinding {
 
 			CheckGraphEditors();
 
-			// End loading and checking
-
 			EditorGUI.indentLevel = 1;
 
 			// Apparently these can sometimes get eaten by unity components
@@ -233,10 +206,8 @@ namespace Pathfinding {
 				EditorGUI.BeginDisabledGroup(true);
 				GUILayout.Button(new GUIContent("Scan", "Cannot recalculate graphs on prefabs"));
 				EditorGUI.EndDisabledGroup();
-			} else {
-				if (GUILayout.Button(new GUIContent("Scan", "Recalculate all graphs. Shortcut cmd+alt+s ( ctrl+alt+s on windows )"))) {
-					RunTask(MenuScan);
-				}
+			} else if (GUILayout.Button(new GUIContent("Scan", "Recalculate all graphs. Shortcut cmd+alt+s ( ctrl+alt+s on windows )"))) {
+				RunTask(MenuScan);
 			}
 
 
@@ -291,13 +262,10 @@ namespace Pathfinding {
 			graphInfoButtonStyle = astarSkin.FindStyle("InfoButton");
 			graphGizmoButtonStyle = astarSkin.FindStyle("GizmoButton");
 			graphEditNameButtonStyle = astarSkin.FindStyle("EditButton");
+			graphDuplicateButtonStyle = astarSkin.FindStyle("DuplicateButton");
 
 			helpBox = inspectorSkin.FindStyle("HelpBox") ?? inspectorSkin.box;
-
-			thinHelpBox = new GUIStyle(helpBox);
-			thinHelpBox.stretchWidth = false;
-			thinHelpBox.clipping = TextClipping.Overflow;
-			thinHelpBox.overflow.bottom += 2;
+			thinHelpBox = astarSkin.FindStyle("Banner");
 
 			stylesLoaded = true;
 			return true;
@@ -436,7 +404,7 @@ namespace Pathfinding {
 			if (FullyDefinedVersion(newVersion) > FullyDefinedVersion(AstarPath.Version)
 				) {
 				GUIUtilityx.PushTint(Color.green);
-				if (GUILayout.Button((beta ? "Beta" : "New") + " Version Available! "+newVersion, thinHelpBox, GUILayout.Height(16))) {
+				if (GUILayout.Button((beta ? "Beta" : "New") + " version available! "+newVersion, thinHelpBox)) {
 					Application.OpenURL(AstarUpdateChecker.GetURL("download"));
 				}
 				GUIUtilityx.PopTint();
@@ -483,9 +451,6 @@ namespace Pathfinding {
 
 			aboutArea.End();
 		}
-
-		/// <summary>Graph editor which has its 'name' field focused</summary>
-		GraphEditor graphNameFocused;
 
 		void DrawGraphHeader (GraphEditor graphEditor) {
 			var graph = graphEditor.target;
@@ -534,6 +499,10 @@ namespace Pathfinding {
 				graphEditor.infoFadeArea.open = graph.infoScreenOpen = false;
 			}
 
+			if (GUILayout.Button(new GUIContent("Duplicate", "Duplicate"), graphDuplicateButtonStyle)) {
+				DuplidateGraph(graph);
+			}
+
 			if (GUILayout.Button(new GUIContent("Delete", "Delete"), graphDeleteButtonStyle)) {
 				RemoveGraph(graph);
 			}
@@ -544,41 +513,34 @@ namespace Pathfinding {
 			graphEditor.infoFadeArea.Begin();
 
 			if (graphEditor.infoFadeArea.BeginFade()) {
-				bool anyNodesNull = false;
 				int total = 0;
 				int numWalkable = 0;
 
 				// Calculate number of nodes in the graph
-				KeyValuePair<float, KeyValuePair<int, int> > pair;
-				graphNodeCounts = graphNodeCounts ?? new Dictionary<NavGraph, KeyValuePair<float, KeyValuePair<int, int> > >();
+				(float, int, int)pair;
+				graphNodeCounts = graphNodeCounts ?? new Dictionary<NavGraph, (float, int, int)>();
 
-				if (!graphNodeCounts.TryGetValue(graphEditor.target, out pair) || (Time.realtimeSinceStartup-pair.Key) > 2) {
+				if (!graphNodeCounts.TryGetValue(graphEditor.target, out pair) || (Time.realtimeSinceStartup-pair.Item1) > 2) {
 					graphEditor.target.GetNodes(node => {
-						if (node == null) {
-							anyNodesNull = true;
-						} else {
+						// Guard against bad user-implemented graphs
+						if (node != null) {
 							total++;
 							if (node.Walkable) numWalkable++;
 						}
 					});
-					pair = new KeyValuePair<float, KeyValuePair<int, int> >(Time.realtimeSinceStartup, new KeyValuePair<int, int>(total, numWalkable));
+					pair = (Time.realtimeSinceStartup, total, numWalkable);
 					graphNodeCounts[graphEditor.target] = pair;
 				}
 
-				total = pair.Value.Key;
-				numWalkable = pair.Value.Value;
-
+				total = pair.Item2;
+				numWalkable = pair.Item3;
 
 				EditorGUI.indentLevel++;
-
-				if (anyNodesNull) {
-					Debug.LogError("Some nodes in the graph are null. Please report this error.");
-				}
 
 				EditorGUILayout.LabelField("Nodes", total.ToString());
 				EditorGUILayout.LabelField("Walkable", numWalkable.ToString());
 				EditorGUILayout.LabelField("Unwalkable", (total-numWalkable).ToString());
-				if (total == 0) EditorGUILayout.HelpBox("The number of nodes in the graph is zero. The graph might not be scanned", MessageType.Info);
+				if (!graphEditor.target.isScanned) EditorGUILayout.HelpBox("The graph is not scanned", MessageType.Info);
 
 				EditorGUI.indentLevel--;
 			}
@@ -614,7 +576,7 @@ namespace Pathfinding {
 				return;
 			}
 
-			script.ConfigureReferencesInternal();
+			script.colorSettings.PushToStatic();
 			EditorGUI.BeginChangeCheck();
 
 			if (!LoadStyles()) return;
@@ -647,7 +609,8 @@ namespace Pathfinding {
 
 			var origWidth = EditorGUIUtility.labelWidth;
 			EditorGUIUtility.labelWidth = 144;
-			GUILayout.BeginArea(new Rect(Camera.current.pixelWidth - width, Camera.current.pixelHeight - height, width - margin, height - margin), "Graph Display", astarSkin.FindStyle("SceneBoxDark"));
+
+			GUILayout.BeginArea(new Rect(Camera.current.pixelWidth/EditorGUIUtility.pixelsPerPoint - width, Camera.current.pixelHeight/EditorGUIUtility.pixelsPerPoint - height, width - margin, height - margin), "Graph Display", astarSkin.FindStyle("SceneBoxDark"));
 			EditorGUILayout.BeginHorizontal();
 			EditorGUILayout.PrefixLabel("Show Graphs", darkSkin.toggle, astarSkin.FindStyle("ScenePrefixLabel"));
 			script.showNavGraphs = EditorGUILayout.Toggle(script.showNavGraphs, darkSkin.toggle);
@@ -704,7 +667,7 @@ namespace Pathfinding {
 
 			if (script.data.cacheStartup && script.data.file_cachedStartup != null) {
 				GUIUtilityx.PushTint(Color.yellow);
-				GUILayout.Label("Startup cached", thinHelpBox, GUILayout.Height(16));
+				GUILayout.Label("Startup cached", thinHelpBox);
 				GUILayout.Space(20);
 				GUIUtilityx.PopTint();
 			}
@@ -821,12 +784,9 @@ namespace Pathfinding {
 		public void RunTask (System.Action action) {
 			EditorApplication.CallbackFunction wrapper = null;
 			wrapper = () => {
-				try {
-					// Run the callback only if the editor has not been disabled since the task was scheduled
-					if (script != null) action();
-				} finally {
-					EditorApplication.update -= wrapper;
-				}
+				EditorApplication.update -= wrapper;
+				// Run the callback only if the editor has not been disabled since the task was scheduled
+				if (script != null) action();
 			};
 			EditorApplication.update += wrapper;
 		}
@@ -957,7 +917,7 @@ namespace Pathfinding {
 			AstarPath astar = UnityCompatibility.FindAnyObjectByType<AstarPath>();
 
 			if (astar != null) {
-				editTags = true;
+				showTagNames = true;
 				showSettings = true;
 				Selection.activeGameObject = astar.gameObject;
 			} else {
@@ -967,7 +927,7 @@ namespace Pathfinding {
 
 		void DrawTagSettings () {
 			tagsArea.Begin();
-			tagsArea.Header("Tag Names", ref editTags);
+			tagsArea.Header("Tag Names", ref showTagNames);
 
 			if (tagsArea.BeginFade()) {
 				string[] tagNames = script.GetTagNames();
@@ -1029,7 +989,7 @@ namespace Pathfinding {
 				EditorGUI.BeginChangeCheck();
 				script.colorSettings._SolidColor = EditorGUILayout.ColorField(new GUIContent("Color", "Color used for the graph when 'Graph Coloring'='Solid Color'"), script.colorSettings._SolidColor);
 				if (EditorGUI.EndChangeCheck()) {
-					script.colorSettings.PushToStatic(script);
+					script.colorSettings.PushToStatic();
 				}
 			}
 
@@ -1095,8 +1055,8 @@ namespace Pathfinding {
 				colors._AreaColors = colors._AreaColors ?? new Color[0];
 
 				// Custom Area Colors
-				customAreaColorsOpen = EditorGUILayout.Foldout(customAreaColorsOpen, "Custom Area Colors");
-				if (customAreaColorsOpen) {
+				showCustomAreaColors = EditorGUILayout.Foldout(showCustomAreaColors, "Custom Area Colors");
+				if (showCustomAreaColors) {
 					EditorGUI.indentLevel += 2;
 
 					for (int i = 0; i < colors._AreaColors.Length; i++) {
@@ -1112,21 +1072,15 @@ namespace Pathfinding {
 					EditorGUI.BeginDisabledGroup(colors._AreaColors.Length > 255);
 
 					if (GUILayout.Button("Add New")) {
-						var newcols = new Color[colors._AreaColors.Length+1];
-						colors._AreaColors.CopyTo(newcols, 0);
-						newcols[newcols.Length-1] = AstarMath.IntToColor(newcols.Length-1, 1F);
-						colors._AreaColors = newcols;
+						Memory.Realloc(ref colors._AreaColors, colors._AreaColors.Length+1);
+						colors._AreaColors[colors._AreaColors.Length-1] = AstarMath.IntToColor(colors._AreaColors.Length-1, 1F);
 					}
 
 					EditorGUI.EndDisabledGroup();
 					EditorGUI.BeginDisabledGroup(colors._AreaColors.Length == 0);
 
 					if (GUILayout.Button("Remove last") && colors._AreaColors.Length > 0) {
-						var newcols = new Color[colors._AreaColors.Length-1];
-						for (int i = 0; i < colors._AreaColors.Length-1; i++) {
-							newcols[i] = colors._AreaColors[i];
-						}
-						colors._AreaColors = newcols;
+						colors._AreaColors = Memory.ShrinkArray(colors._AreaColors, colors._AreaColors.Length-1);
 					}
 
 					EditorGUI.EndDisabledGroup();
@@ -1136,7 +1090,7 @@ namespace Pathfinding {
 				}
 
 				if (GUI.changed) {
-					colors.PushToStatic(script);
+					colors.PushToStatic();
 				}
 			}
 
@@ -1144,48 +1098,40 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Make sure every graph has a graph editor</summary>
-		void CheckGraphEditors (bool forceRebuild = false) {
-			if (forceRebuild || graphEditors == null || script.graphs == null || script.graphs.Length != graphEditors.Length) {
-				if (script.data.graphs == null) {
-					script.data.graphs = new NavGraph[0];
+		void CheckGraphEditors () {
+			var data = script.data;
+			data.graphs = data.graphs ?? new NavGraph[0];
+			// Ensure graphEditors.Length >= data.graphs.Length
+			Memory.Realloc(ref graphEditors, data.graphs.Length);
+
+			for (int i = 0; i < script.graphs.Length; i++) {
+				var graph = script.graphs[i];
+
+				if (graph != null && graph.guid == new Pathfinding.Util.Guid()) {
+					graph.guid = Pathfinding.Util.Guid.NewGuid();
 				}
 
-				graphEditors = new GraphEditor[script.graphs.Length];
-
-				for (int i = 0; i < script.graphs.Length; i++) {
-					NavGraph graph = script.graphs[i];
-
-					if (graph == null) continue;
-
-					if (graph.guid == new Pathfinding.Util.Guid()) {
-						graph.guid = Pathfinding.Util.Guid.NewGuid();
-					}
-
-					if (graph.showInInspector) graphEditors[i] = CreateGraphEditor(graph);
+				if (graph == null || !graph.showInInspector) {
+					graphEditors[i] = null;
+					continue;
 				}
-			} else {
-				for (int i = 0; i < script.graphs.Length; i++) {
-					var graph = script.graphs[i];
-					if (graph == null || !graph.showInInspector) continue;
 
-					// TODO
-					if (graphEditors[i] == null || !graphEditorTypes.TryGetValue(graph.GetType().Name, out var ed) || ed.editorType != graphEditors[i].GetType()) {
-						CheckGraphEditors(true);
-						return;
-					}
-
-					if (graph.guid == new Pathfinding.Util.Guid()) {
-						graph.guid = Pathfinding.Util.Guid.NewGuid();
-					}
-
-					graphEditors[i].target = graph;
+				if (graphEditors[i] == null || graphEditors[i].target != graph) {
+					graphEditors[i] = CreateGraphEditor(graph);
 				}
 			}
 		}
 
 		void RemoveGraph (NavGraph graph) {
 			script.data.RemoveGraph(graph);
-			CheckGraphEditors(true);
+			CheckGraphEditors();
+			GUI.changed = true;
+			Repaint();
+		}
+
+		void DuplidateGraph (NavGraph graph) {
+			script.data.DuplicateGraph(graph);
+			CheckGraphEditors();
 			GUI.changed = true;
 			Repaint();
 		}
@@ -1209,7 +1155,7 @@ namespace Pathfinding {
 				var editorData = (graph as IGraphInternals).SerializedEditorSettings;
 				if (editorData != null) Pathfinding.Serialization.TinyJsonDeserializer.Deserialize(editorData, graphEditorType, result, script.gameObject);
 			} else {
-				Debug.LogError("Couldn't find an editor for the graph type '" + graphType + "' There are " + graphEditorTypes.Count + " available graph editors");
+				Debug.LogError("Couldn't find an editor for the graph type '" + graphType + "'. There are " + graphEditorTypes.Count + " available graph editors");
 				result = new GraphEditor();
 				graphEditorTypes[graphType] = new CustomGraphEditorAttribute(graph.GetType(), graphType) {
 					editorType = typeof(GraphEditor)
@@ -1227,36 +1173,22 @@ namespace Pathfinding {
 
 		void HandleUndo () {
 			// The user has tried to undo something, apply that
-			if (script.data.GetData() == null) {
-				script.data.SetData(new byte[0]);
-			} else {
-				LoadGraphs();
-			}
-		}
-
-		/// <summary>Hashes the contents of a byte array</summary>
-		static int ByteArrayHash (byte[] arr) {
-			if (arr == null) return -1;
-			int hash = -1;
-			for (int i = 0; i < arr.Length; i++) {
-				hash ^= (arr[i]^i)*3221;
-			}
-			return hash;
+			DeserializeGraphs();
 		}
 
 		void SerializeIfDataChanged () {
 			byte[] bytes = SerializeGraphs(out var checksum);
 
-			int byteHash = ByteArrayHash(bytes);
-			int dataHash = ByteArrayHash(script.data.GetData());
-			//Check if the data is different than the previous data, use checksums
+			uint byteHash = Checksum.GetChecksum(bytes);
+			uint dataHash = Checksum.GetChecksum(script.data.GetData());
+			// Check if the data is different than the previous data, use checksums
 			bool isDifferent = checksum != ignoredChecksum && dataHash != byteHash;
 
-			//Only save undo if the data was different from the last saved undo
+			// nly save undo if the data was different from the last saved undo
 			if (isDifferent) {
 				Undo.RegisterCompleteObjectUndo(script, "A* Graph Settings");
 				Undo.IncrementCurrentGroup();
-				//Assign the new data
+				// Assign the new data
 				script.data.SetData(bytes);
 				EditorUtility.SetDirty(script);
 			}
@@ -1268,8 +1200,8 @@ namespace Pathfinding {
 
 			byte[] bytes = SerializeGraphs(out var checksum);
 
-			//Check if the data is different than the previous data, use checksums
-			bool isDifferent = ByteArrayHash(script.data.GetData()) != ByteArrayHash(bytes);
+			// Check if the data is different than the previous data, use checksums
+			bool isDifferent = Checksum.GetChecksum(script.data.GetData()) != Checksum.GetChecksum(bytes);
 
 			if (isDifferent) {
 				HandleUndo();
@@ -1302,20 +1234,11 @@ namespace Pathfinding {
 
 			if (Event.current == null || script.data.GetData() == null) {
 				SerializeIfDataChanged();
-				return;
 			}
 		}
 
-		/// <summary>Load graphs from serialized data</summary>
-		public void LoadGraphs () {
-			DeserializeGraphs();
-		}
-
 		public byte[] SerializeGraphs (out uint checksum) {
-			var settings = Pathfinding.Serialization.SerializeSettings.Settings;
-
-			settings.editorSettings = true;
-			return SerializeGraphs(settings, out checksum);
+			return SerializeGraphs(Pathfinding.Serialization.SerializeSettings.Settings, out checksum);
 		}
 
 		public byte[] SerializeGraphs (Pathfinding.Serialization.SerializeSettings settings, out uint checksum) {
@@ -1333,16 +1256,18 @@ namespace Pathfinding {
 		}
 
 		void DeserializeGraphs () {
-			if (script.data.GetData() == null || script.data.GetData().Length == 0) {
-				script.data.graphs = new NavGraph[0];
-			} else {
-				DeserializeGraphs(script.data.GetData());
-			}
+			// User has cleared the data field. Revert this.
+			if (script.data.GetData() == null) script.data.SetData(new byte[0]);
+			DeserializeGraphs(script.data.GetData());
 		}
 
 		void DeserializeGraphs (byte[] bytes) {
 			try {
-				script.data.DeserializeGraphs(bytes);
+				if (bytes == null || bytes.Length == 0) {
+					script.data.graphs = new NavGraph[0];
+				} else {
+					script.data.DeserializeGraphs(bytes);
+				}
 				// Make sure every graph has a graph editor
 				CheckGraphEditors();
 			} catch (System.Exception e) {
@@ -1386,36 +1311,17 @@ namespace Pathfinding {
 
 		/// <summary>Searches in the current assembly for GraphEditor and NavGraph types</summary>
 		void FindGraphTypes () {
+			if (graphEditorTypes.Count > 0) return;
+
 			graphEditorTypes = new Dictionary<string, CustomGraphEditorAttribute>();
 
-			foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies()) {
-				System.Type[] types = null;
-				try {
-					types = assembly.GetTypes();
-				} catch {
-					// Ignore type load exceptions and things like that.
-					// We might not be able to read all assemblies for some reason, but hopefully the relevant types exist in the assemblies that we can read
-					continue;
-				}
-
-				// Iterate through the assembly for classes which inherit from GraphEditor
-				foreach (var type in types) {
-					System.Type baseType = type.BaseType;
-					while (!System.Type.Equals(baseType, null)) {
-						if (System.Type.Equals(baseType, typeof(GraphEditor))) {
-							System.Object[] att = type.GetCustomAttributes(false);
-
-							// Loop through the attributes for the CustomGraphEditorAttribute attribute
-							foreach (var attribute in att) {
-								if (attribute is CustomGraphEditorAttribute cge && !System.Type.Equals(cge.graphType, null)) {
-									cge.editorType = type;
-									graphEditorTypes.Add(cge.graphType.Name, cge);
-								}
-							}
-							break;
-						}
-
-						baseType = baseType.BaseType;
+			var editorTypes = AssemblySearcher.FindTypesInheritingFrom<GraphEditor>();
+			foreach (var type in editorTypes) {
+				// Loop through the attributes for the CustomGraphEditorAttribute attribute
+				foreach (var attribute in type.GetCustomAttributes(false)) {
+					if (attribute is CustomGraphEditorAttribute cge && !System.Type.Equals(cge.graphType, null)) {
+						cge.editorType = type;
+						graphEditorTypes.Add(cge.graphType.Name, cge);
 					}
 				}
 			}

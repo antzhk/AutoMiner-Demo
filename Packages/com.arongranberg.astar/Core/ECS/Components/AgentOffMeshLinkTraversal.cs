@@ -95,6 +95,7 @@ namespace Pathfinding.ECS {
 		internal unsafe MovementSettings* movementSettingsPtr;
 		internal unsafe LocalTransform* transformPtr;
 		internal unsafe AgentMovementPlane* movementPlanePtr;
+		internal EnabledRefRW<AgentOffMeshLinkMovementDisabled> movementDisabled;
 
 		/// <summary>The entity that is traversing the off-mesh link</summary>
 		public Entity entity;
@@ -164,7 +165,9 @@ namespace Pathfinding.ECS {
 		/// <summary>
 		/// How the agent should move.
 		///
-		/// The agent will move according to this data, every frame.
+		/// The agent will move according to this data, every frame, if <see cref="enableBuiltInMovement"/> is enabled.
+		///
+		/// Note: <see cref="enableBuiltInMovement"/> needs to be enabled every tick to allow the agent to move.
 		/// </summary>
 		public ref MovementControl movementControl {
 			get {
@@ -211,6 +214,25 @@ namespace Pathfinding.ECS {
 			}
 		}
 
+		/// <summary>
+		/// True if the agent's built-in movement logic should be enabled.
+		///
+		/// When traversing an off-mesh link, you typically want the agent's movement to be completely controlled by an animation, or some other code.
+		/// However, sometimes you may want to use the built-in movement logic to move the agent.
+		///
+		/// Using the <see cref="MoveTowards"/> method will automatically enable the agent's movement logic during that frame.
+		///
+		/// Note: This will be reset to false every frame. Right before the off-mesh link traversal coroutine is executed.
+		///
+		/// See: <see cref="MoveTowards"/>
+		/// </summary>
+		public bool enableBuiltInMovement {
+			get => movementDisabled.IsValid ? !movementDisabled.ValueRW : true;
+			set {
+				if (movementDisabled.IsValid) movementDisabled.ValueRW = !value;
+			}
+		}
+
 		public AgentOffMeshLinkTraversalContext (OffMeshLinks.OffMeshLinkConcrete link) {
 			this.concreteLink = link;
 		}
@@ -221,12 +243,13 @@ namespace Pathfinding.ECS {
 		/// This is used by the job system to set the data of the context.
 		/// You should almost never need to use this.
 		/// </summary>
-		public virtual unsafe void SetInternalData (Entity entity, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, ManagedState state, float deltaTime) {
+		public virtual unsafe void SetInternalData (Entity entity, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, EnabledRefRW<AgentOffMeshLinkMovementDisabled> movementDisabled, ManagedState state, float deltaTime) {
 			this.linkInfoPtr = (AgentOffMeshLinkTraversal*)UnsafeUtility.AddressOf(ref linkInfo);
 			this.movementControlPtr = (MovementControl*)UnsafeUtility.AddressOf(ref movementControl);
 			this.movementSettingsPtr = (MovementSettings*)UnsafeUtility.AddressOf(ref movementSettings);
 			this.transformPtr = (LocalTransform*)UnsafeUtility.AddressOf(ref transform);
 			this.movementPlanePtr = (AgentMovementPlane*)UnsafeUtility.AddressOf(ref movementPlane);
+			this.movementDisabled = movementDisabled;
 			this.managedState = state;
 			this.deltaTime = deltaTime;
 			this.entity = entity;
@@ -289,7 +312,7 @@ namespace Pathfinding.ECS {
 		/// <summary>
 		/// Thrown when the off-mesh link traversal should be aborted.
 		///
-		/// See: <see cref="AgentOffMeshLinkTraversal.Abort"/>
+		/// See: <see cref="AgentOffMeshLinkTraversalContext.Abort"/>
 		/// </summary>
 		public class AbortOffMeshLinkTraversal : System.Exception {}
 
@@ -307,7 +330,7 @@ namespace Pathfinding.ECS {
 		public virtual void Abort (bool teleportToStart = true) {
 			if (teleportToStart) Teleport(link.relativeStart);
 			// Cancel the current path, as otherwise the agent will instantly try to traverse the off-mesh link again.
-			managedState.pathTracer.SetFromSingleNode(managedState.pathTracer.startNode, transform.Position, movementPlane);
+			managedState.pathTracer.RemoveAllButFirstNode(movementPlane, managedState.pathfindingSettings.traversalProvider);
 			throw new AbortOffMeshLinkTraversal();
 		}
 
@@ -320,6 +343,8 @@ namespace Pathfinding.ECS {
 		/// Note: This method completely ignores the navmesh. It also overrides local avoidance, if enabled (other agents will still avoid it, but this agent will not avoid other agents).
 		///
 		/// TODO: The gravity property is not yet implemented. Gravity is always applied.
+		///
+		/// See: For more control, you can set <see cref="movementControl"/> directly.
 		/// </summary>
 		/// <param name="position">The position to move towards.</param>
 		/// <param name="rotation">The rotation to rotate towards.</param>
@@ -331,6 +356,10 @@ namespace Pathfinding.ECS {
 			// The agent will try to remove its remaining rotation smoothing offset as quickly as possible.
 			// After the off-mesh link is traversed, the rotation smoothing will be automatically restored.
 			DisableRotationSmoothing();
+
+			// Make sure the agent's movement logic is enabled.
+			// This will reset every tick.
+			enableBuiltInMovement = true;
 
 			var dirInPlane = movementPlane.ToPlane(position - transform.Position);
 			var remainingDistance = math.length(dirInPlane);
@@ -364,12 +393,13 @@ namespace Pathfinding.ECS {
 			clone.entity = Entity.Null;
 			clone.gameObjectCache = null;
 			clone.managedState = null;
+			clone.movementDisabled = default;
 			unsafe {
-				linkInfoPtr = null;
-				movementControlPtr = null;
-				movementSettingsPtr = null;
-				transformPtr = null;
-				movementPlanePtr = null;
+				clone.linkInfoPtr = null;
+				clone.movementControlPtr = null;
+				clone.movementSettingsPtr = null;
+				clone.transformPtr = null;
+				clone.movementPlanePtr = null;
 			}
 			return clone;
 		}

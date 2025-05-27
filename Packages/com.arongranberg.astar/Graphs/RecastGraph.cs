@@ -9,20 +9,65 @@ namespace Pathfinding {
 	using Pathfinding.Graphs.Navmesh;
 	using Pathfinding.Util;
 	using Pathfinding.Jobs;
+	using Pathfinding.Sync;
+	using Pathfinding.Pooling;
 	using Pathfinding.Graphs.Navmesh.Jobs;
-	using Pathfinding.Drawing;
+	using Pathfinding.Collections;
 
 	/// <summary>
 	/// Automatically generates navmesh graphs based on world geometry.
 	///
 	/// [Open online documentation to see images]
 	///
-	/// The recast graph is based on Recast (http://code.google.com/p/recastnavigation/).
+	/// The recast graph is based on Recast (https://github.com/memononen/recastnavigation).
 	/// I have translated a good portion of it to C# to run it natively in Unity.
 	///
-	/// For a tutorial on how to configure a recast graph, take a look at create-recast (view in online documentation for working links).
+	/// See: get-started-recast (view in online documentation for working links)
+	/// See: graphTypes (view in online documentation for working links)
+	///
+	/// \section recastinspector Inspector
 	///
 	/// [Open online documentation to see images]
+	///
+	/// <b>Shape</b>
+	/// \inspectorField{Dimensions, dimensionMode}
+	/// \inspectorField{Center, forcedBoundsCenter}
+	/// \inspectorField{Size, forcedBoundsSize}
+	/// \inspectorField{Rotation, rotation}
+	/// \inspectorField{Snap bounds to scene, SnapBoundsToScene}
+	///
+	/// <b>Input Filtering</b>
+	/// \inspectorField{Filter Objects By, collectionSettings.collectionMode}
+	/// \inspectorField{Layer Mask, collectionSettings.layerMask}
+	/// \inspectorField{Tag Mask, collectionSettings.tagMask}
+	/// \inspectorField{Rasterize Terrains, collectionSettings.rasterizeTerrain}
+	/// \inspectorField{Rasterize Trees, collectionSettings.rasterizeTrees}
+	/// \inspectorField{Heightmap Downsampling, collectionSettings.terrainHeightmapDownsamplingFactor}
+	/// \inspectorField{Rasterize Meshes, collectionSettings.rasterizeMeshes}
+	/// \inspectorField{Rasterize Colliders, collectionSettings.rasterizeColliders}
+	///
+	/// <b>Agent Characteristics</b>
+	/// \inspectorField{Character Radius, characterRadius}
+	/// \inspectorField{Character Height, walkableHeight}
+	/// \inspectorField{Max Step Height, walkableClimb}
+	/// \inspectorField{Max Slope, maxSlope}
+	/// \inspectorField{Per Layer Modifications, perLayerModifications}
+	///
+	/// <b>Rasterization</b>
+	/// \inspectorField{Voxel Size, cellSize}
+	/// \inspectorField{Use Tiles, useTiles}
+	/// \inspectorField{Tile Size, editorTileSize}
+	/// \inspectorField{Max Border Edge Length, maxEdgeLength}
+	/// \inspectorField{Edge Simplification, contourMaxError}
+	/// \inspectorField{Min Region Size, minRegionSize}
+	/// \inspectorField{Round Collider Detail, collectionSettings.colliderRasterizeDetail}
+	///
+	/// <b>Runtime Settings</b>
+	/// \inspectorField{Affected By Navmesh Cuts, enableNavmeshCutting}
+	///
+	/// <b>Advanced</b>
+	/// \inspectorField{Relevant Graph Surface Mode, relevantGraphSurfaceMode}
+	/// \inspectorField{Initial Penalty, initialPenalty}
 	///
 	/// \section howitworks How a recast graph works
 	/// When generating a recast graph what happens is that the world is voxelized.
@@ -61,9 +106,12 @@ namespace Pathfinding {
 		/// <summary>
 		/// Radius of the agent which will traverse the navmesh.
 		/// The navmesh will be eroded with this radius.
+		///
+		/// This value will be rounded up to the nearest multiple of <see cref="cellSize"/>.
+		///
 		/// [Open online documentation to see images]
 		/// </summary>
-		public float characterRadius = 1.5F;
+		public float characterRadius = 0.5F;
 
 		/// <summary>
 		/// Max distance from simplified edge to real edge.
@@ -93,7 +141,7 @@ namespace Pathfinding {
 		/// [Open online documentation to see images]
 		/// </summary>
 		[JsonMember]
-		public float cellSize = 0.5F;
+		public float cellSize = 0.25F;
 
 		/// <summary>
 		/// Character height.
@@ -262,20 +310,20 @@ namespace Pathfinding {
 		/// This can be used to make all surfaces with a specific layer get a specific pathfinding tag for example.
 		/// Or make all surfaces with a specific layer unwalkable.
 		///
-		/// See: If you instead want to apply similar settings on an object level, you can use the <see cref="RecastMeshObj"/> component.
+		/// See: If you instead want to apply similar settings on an object level, you can use the <see cref="RecastNavmeshModifier"/> component.
 		/// </summary>
 		[System.Serializable]
 		public struct PerLayerModification {
-			/// <summary>Layer that this modification applies to</summary>
+			/// <summary>Unity layer that this modification applies to</summary>
 			public int layer;
-			/// <summary>\copydocref{RecastMeshObj.mode}</summary>
-			public RecastMeshObj.Mode mode;
-			/// <summary>\copydocref{RecastMeshObj.surfaceID}</summary>
+			/// <summary>\copydocref{RecastNavmeshModifier.mode}</summary>
+			public RecastNavmeshModifier.Mode mode;
+			/// <summary>\copydocref{RecastNavmeshModifier.surfaceID}</summary>
 			public int surfaceID;
 
 			public static PerLayerModification Default => new PerLayerModification {
 				layer = 0,
-				mode = RecastMeshObj.Mode.WalkableSurface,
+				mode = RecastNavmeshModifier.Mode.WalkableSurface,
 				surfaceID = 1,
 			};
 
@@ -344,11 +392,11 @@ namespace Pathfinding {
 			///
 			/// Depending on the <see cref="dimensionMode"/>, either 3D or 2D colliders will be rasterized.
 			///
-			/// Sphere/Capsule/Circle colliders will be approximated using polygons, with the precision specified in <see cref="RecastGraph.colliderRasterizeDetail"/>.
+			/// Sphere/Capsule/Circle colliders will be approximated using polygons, with the precision specified in <see cref="colliderRasterizeDetail"/>.
 			///
 			/// Note: In 2D mode, this is always treated as enabled, because no other types of inputs (like meshes or terrains) are supported.
 			/// </summary>
-			public bool rasterizeColliders;
+			public bool rasterizeColliders = true;
 
 			/// <summary>
 			/// Use scene meshes to calculate the navmesh.
@@ -360,12 +408,12 @@ namespace Pathfinding {
 			/// so the graph has to iterate over all meshes in the scene just to find the ones relevant for the tiles that you want to update.
 			/// Colliders, on the other hand, can be efficiently queried using the physics system.
 			///
-			/// You can disable this and attach a <see cref="RecastMeshObj"/> component (with dynamic=false) to all meshes that you want to be included in the navmesh instead.
+			/// You can disable this and attach a <see cref="RecastNavmeshModifier"/> component (with dynamic=false) to all meshes that you want to be included in the navmesh instead.
 			/// That way they will be able to be efficiently queried for, without having to iterate through all meshes in the scene.
 			///
 			/// In 2D mode, this setting has no effect.
 			/// </summary>
-			public bool rasterizeMeshes = true;
+			public bool rasterizeMeshes;
 
 			/// <summary>
 			/// Use terrains to calculate the navmesh.
@@ -391,7 +439,7 @@ namespace Pathfinding {
 			/// In 2D mode, this setting has no effect.
 			///
 			/// See: <see cref="rasterizeTerrain"/>
-			/// See: <see cref="RecastGraph.colliderRasterizeDetail"/>
+			/// See: <see cref="colliderRasterizeDetail"/>
 			/// </summary>
 			public bool rasterizeTrees = true;
 
@@ -471,7 +519,7 @@ namespace Pathfinding {
 		///
 		/// Each layer should be modified at most once in this list.
 		///
-		/// If an object has a <see cref="RecastMeshObj"/> component attached, the settings on that component will override the settings in this list.
+		/// If an object has a <see cref="RecastNavmeshModifier"/> component attached, the settings on that component will override the settings in this list.
 		///
 		/// See: <see cref="PerLayerModification"/>
 		/// </summary>
@@ -494,7 +542,7 @@ namespace Pathfinding {
 		/// For 2D games, it can be very useful to set the background to be walkable by default, and then
 		/// constrain walkability using colliders.
 		///
-		/// If you don't want to use a walkable background, you can instead create colliders and attach a RecastMeshObj with Surface Type set to Walkable Surface.
+		/// If you don't want to use a walkable background, you can instead create colliders and attach a RecastNavmeshModifier with Surface Type set to Walkable Surface.
 		/// These will then create walkable regions.
 		///
 		/// See: <see cref="dimensionMode"/>
@@ -584,7 +632,7 @@ namespace Pathfinding {
 		/// so the graph has to iterate over all meshes in the scene just to find the ones relevant for the tiles that you want to update.
 		/// Colliders, on the other hand, can be efficiently queried using the physics system.
 		///
-		/// You can disable this and attach a <see cref="RecastMeshObj"/> component (with dynamic=false) to all meshes that you want to be included in the navmesh instead.
+		/// You can disable this and attach a <see cref="RecastNavmeshModifier"/> component (with dynamic=false) to all meshes that you want to be included in the navmesh instead.
 		/// That way they will be able to be efficiently queried for, without having to iterate through all meshes in the scene.
 		///
 		/// In 2D mode, this setting has no effect.
@@ -775,10 +823,14 @@ namespace Pathfinding {
 			}
 		}
 
+		[System.Obsolete("Use SnapBoundsToScene instead")]
+		public void SnapForceBoundsToScene () {
+			SnapBoundsToScene();
+		}
+
 		/// <summary>
-		/// Changes the bounds of the graph to precisely encapsulate all objects in the scene that can be included in the scanning process based on the settings.
-		/// Which objects are used depends on the settings. If an object would have affected the graph with the current settings if it would have
-		/// been inside the bounds of the graph, it will be detected and the bounds will be expanded to contain that object.
+		/// Changes the bounds of the graph to precisely encapsulate all objects in the scene.
+		/// The bounds will be expanded to fit all objects in the scene which match the current scanning settings.
 		///
 		/// This method corresponds to the 'Snap bounds to scene' button in the inspector.
 		///
@@ -791,7 +843,7 @@ namespace Pathfinding {
 		/// See: forcedBoundsCenter
 		/// See: forcedBoundsSize
 		/// </summary>
-		public void SnapForceBoundsToScene () {
+		public void SnapBoundsToScene () {
 			var arena = new DisposeArena();
 			var meshes = new TileBuilder(this, new TileLayout(this), default).CollectMeshes(new Bounds(Vector3.zero, new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity)));
 
@@ -804,9 +856,15 @@ namespace Pathfinding {
 					bounds.Encapsulate(m.ToWorld(meshes.meshes[i].bounds));
 				}
 
+				// Make sure the character can stand on all surfaces (with a bit of margin)
+				bounds.max += Vector3.up * (walkableHeight * 1.1f);
+
+				// Add a small bit of margin below the lowest surface, to ensure polygons right at the bottom are not lost due to floating point errors.
+				bounds.min -= Vector3.up * 0.01f;
+
 				// The center is in world space, so we need to convert it back from the rotated space
 				forcedBoundsCenter = Quaternion.Euler(rotation) * bounds.center;
-				forcedBoundsSize = bounds.size;
+				forcedBoundsSize = Vector3.Max(bounds.size, Vector3.one*0.01f);
 			}
 
 			arena.Add(meshes);
@@ -816,13 +874,13 @@ namespace Pathfinding {
 		DisposeArena pendingGraphUpdateArena = new DisposeArena();
 
 		class RecastGraphUpdatePromise : IGraphUpdatePromise {
-			public List<(Promise<TileBuilder.TileBuilderOutput>, Promise<JobBuildNodes.BuildNodeTilesOutput>)> promises;
+			public List<(Promise<TileBuilder.TileBuilderOutput>, Promise<TileCutter.TileCutterOutput>, Promise<JobBuildNodes.BuildNodeTilesOutput>)> promises;
 			public List<GraphUpdateObject> graphUpdates;
 			public RecastGraph graph;
 			int graphHash;
 
 			public RecastGraphUpdatePromise (RecastGraph graph, List<GraphUpdateObject> graphUpdates) {
-				this.promises = ListPool<(Promise<TileBuilder.TileBuilderOutput>, Promise<JobBuildNodes.BuildNodeTilesOutput>)>.Claim();
+				this.promises = ListPool<(Promise<TileBuilder.TileBuilderOutput>, Promise<TileCutter.TileCutterOutput>, Promise<JobBuildNodes.BuildNodeTilesOutput>)>.Claim();
 				this.graph = graph;
 				this.graphHash = HashSettings(graph);
 				var tileRecalculations = ListPool<(IntRect, GraphUpdateObject)>.Claim();
@@ -866,8 +924,14 @@ namespace Pathfinding {
 
 					var tileLayout = new TileLayout(graph);
 					var pendingGraphUpdatePromise = RecastBuilder.BuildTileMeshes(graph, tileLayout, touchingTiles).Schedule(graph.pendingGraphUpdateArena);
-					var pendingGraphUpdatePromise2 = RecastBuilder.BuildNodeTiles(graph, tileLayout).Schedule(graph.pendingGraphUpdateArena, pendingGraphUpdatePromise);
-					promises.Add((pendingGraphUpdatePromise, pendingGraphUpdatePromise2));
+					var pendingCutPromise = RecastBuilder.CutTiles(graph, graph.navmeshUpdateData.clipperLookup, tileLayout).Schedule(pendingGraphUpdatePromise);
+					var pendingGraphUpdatePromise2 = RecastBuilder.BuildNodeTiles(graph, tileLayout).Schedule(graph.pendingGraphUpdateArena, pendingGraphUpdatePromise, pendingCutPromise);
+					promises.Add((pendingGraphUpdatePromise, pendingCutPromise, pendingGraphUpdatePromise2));
+
+					// TODO: Ideally we'd inform the navmesh cutting system that we have updated tiles here.
+					// Not notifying it is fine, but if a navmesh cut had been moved right before a graph update,
+					// the tile may be cut twice unnecessarily, losing a small amount of performance.
+					// Typically one does not combine navmesh cutting and normal graph updates, though.
 				}
 
 				if (tileRecalculations.Count > 1) {
@@ -898,15 +962,17 @@ namespace Pathfinding {
 				if (HashSettings(graph) != graphHash) throw new System.InvalidOperationException("Recast graph changed while a graph update was in progress. This is not allowed. Use AstarPath.active.AddWorkItem if you need to update graphs.");
 
 				for (int i = 0; i < promises.Count; i++) {
-					var promise1 = promises[i].Item1;
-					var promise2 = promises[i].Item2;
+					var preCutPromise = promises[i].Item1;
+					var postCutPromise = promises[i].Item2;
+					var tilePromise = promises[i].Item3;
 					Profiler.BeginSample("Applying graph update results");
-					var tilesResult = promise2.Complete();
-					var tileRect = tilesResult.dependency.tileMeshes.tileRect;
+					var tilesResult = tilePromise.Complete();
+					var tileRect = tilesResult.progressSource.tileMeshes.tileRect;
 
 					var tiles = tilesResult.tiles;
-					promise1.Dispose();
-					promise2.Dispose();
+					preCutPromise.Dispose();
+					postCutPromise.Dispose();
+					tilePromise.Dispose();
 
 					// Initialize all nodes that were created in the jobs
 					for (int j = 0; j < tiles.Length; j++) AstarPath.active.InitializeNodes(tiles[j].nodes);
@@ -914,16 +980,13 @@ namespace Pathfinding {
 					// Assign all tiles to the graph.
 					// Remove connections from existing tiles destroy the nodes
 					// Replace the old tile by the new tile
-					graph.StartBatchTileUpdate();
+					graph.StartBatchTileUpdate(exclusive: true);
 					for (int z = 0; z < tileRect.Height; z++) {
 						for (int x = 0; x < tileRect.Width; x++) {
-							var tileIndex = (z+tileRect.ymin)*graph.tileXCount + (x + tileRect.xmin);
-							graph.ClearTile(x + tileRect.xmin, z+tileRect.ymin);
-
 							var newTile = tiles[z*tileRect.Width + x];
 							// Assign the new tile
 							newTile.graph = graph;
-							graph.tiles[tileIndex] = newTile;
+							graph.ClearTile(x + tileRect.xmin, z+tileRect.ymin, newTile);
 						}
 					}
 					graph.EndBatchTileUpdate();
@@ -938,13 +1001,6 @@ namespace Pathfinding {
 					JobConnectTiles.ScheduleRecalculateBorders(tilesHandle, default, graphTileRect, tileRect, new Vector2(graph.TileWorldSizeX, graph.TileWorldSizeZ), graph.MaxTileConnectionEdgeDistance).Complete();
 					tilesHandle.Free();
 
-					// Signal that tiles have been recalculated to the navmesh cutting system.
-					// This may be used to update the tile again to take into
-					// account NavmeshCut components.
-					// It is not the super efficient, but it works.
-					// Usually you only use either normal graph updates OR navmesh
-					// cutting, not both.
-					graph.navmeshUpdateData.OnRecalculatedTiles(tiles);
 					if (graph.OnRecalculatedTiles != null) graph.OnRecalculatedTiles(tiles);
 					ctx.DirtyBounds(graph.GetTileBounds(tileRect));
 
@@ -985,6 +1041,7 @@ namespace Pathfinding {
 			bool emptyGraph;
 			NavmeshTile[] tiles;
 			IProgress progressSource;
+			NavmeshUpdates.NavmeshUpdateSettings cutSettings;
 
 			public float Progress => progressSource != null ? progressSource.Progress : 1;
 
@@ -1010,22 +1067,33 @@ namespace Pathfinding {
 				}
 
 				var arena = new DisposeArena();
-				var tileMeshesPromise = RecastBuilder.BuildTileMeshes(graph, tileLayout, new IntRect(0, 0, tileLayout.tileCount.x - 1, tileLayout.tileCount.y - 1)).Schedule(arena);
+				var tileRect = new IntRect(0, 0, tileLayout.tileCount.x - 1, tileLayout.tileCount.y - 1);
+				var tileMeshesPromise = RecastBuilder.BuildTileMeshes(graph, tileLayout, tileRect).Schedule(arena);
+
+				cutSettings = new NavmeshUpdates.NavmeshUpdateSettings(graph, tileLayout);
+				var cutPromise = RecastBuilder.CutTiles(graph, cutSettings.clipperLookup, tileLayout).Schedule(tileMeshesPromise);
+
+				// Mark all navmesh cuts as up to date, since we are combining the cutting with the scan
+				cutSettings.DiscardPending();
+
 				var buildNodesJob = RecastBuilder.BuildNodeTiles(graph, tileLayout);
-				var tilesPromise = buildNodesJob.Schedule(arena, tileMeshesPromise);
+				var tilesPromise = buildNodesJob.Schedule(arena, tileMeshesPromise, cutPromise);
 				progressSource = tilesPromise;
+
 				yield return tilesPromise.handle;
 
 				progressSource = null;
 				var tiles = tilesPromise.Complete();
-				var tileMeshes = tileMeshesPromise.Complete();
+				var preCutMeshes = tileMeshesPromise.Complete();
+				var tileMeshes = cutPromise.Complete();
 				this.tiles = tiles.tiles;
 
 #if UNITY_EDITOR
-				meshesUnreadableAtRuntime = tileMeshes.meshesUnreadableAtRuntime;
-				tileMeshes.meshesUnreadableAtRuntime = null;
+				meshesUnreadableAtRuntime = preCutMeshes.meshesUnreadableAtRuntime;
+				preCutMeshes.meshesUnreadableAtRuntime = null;
 #endif
 
+				preCutMeshes.Dispose();
 				tileMeshes.Dispose();
 				tiles.Dispose();
 				arena.DisposeAll();
@@ -1036,6 +1104,7 @@ namespace Pathfinding {
 				graph.DestroyAllNodes();
 				graph.hasExtendedInZ = false;
 				graph.hasExtendedInX = false;
+				cutSettings.AttachToGraph();
 
 				if (emptyGraph) {
 					graph.SetLayout(tileLayout);
@@ -1057,8 +1126,6 @@ namespace Pathfinding {
 					for (int i = 0; i < tiles.Length; i++) tiles[i].graph = graph;
 				}
 
-				// Signal that tiles have been recalculated to the navmesh cutting system.
-				graph.navmeshUpdateData.OnRecalculatedTiles(graph.tiles);
 				if (graph.OnRecalculatedTiles != null) graph.OnRecalculatedTiles(graph.tiles.Clone() as NavmeshTile[]);
 			}
 		}
@@ -1081,7 +1148,7 @@ namespace Pathfinding {
 		/// <param name="dx">Number of tiles along the graph's X axis to move by.</param>
 		/// <param name="dz">Number of tiles along the graph's Z axis to move by.</param>
 		public IGraphUpdatePromise TranslateInDirection (int dx, int dz) {
-			return new RecastMovePromise(this, new Int2(dx, dz));
+			return new RecastMovePromise(this, new Vector2Int(dx, dz));
 		}
 
 		bool hasExtendedInX = false;
@@ -1090,10 +1157,10 @@ namespace Pathfinding {
 		class RecastMovePromise : IGraphUpdatePromise {
 			RecastGraph graph;
 			TileMeshes tileMeshes;
-			Int2 delta;
+			Vector2Int delta;
 			IntRect newTileRect;
 
-			public RecastMovePromise(RecastGraph graph, Int2 delta) {
+			public RecastMovePromise(RecastGraph graph, Vector2Int delta) {
 				this.graph = graph;
 				this.delta = delta;
 				if (delta.x != 0 && delta.y != 0) throw new System.ArgumentException("Only translation in a single direction is supported. delta.x == 0 || delta.y == 0 must hold.");
@@ -1236,8 +1303,9 @@ namespace Pathfinding {
 			if (!newTileBounds.IsValid()) throw new System.ArgumentException("Invalid tile bounds");
 			if (newTileBounds == new IntRect(0, 0, tileXCount-1, tileZCount-1)) return;
 			if (newTileBounds.Area == 0) throw new System.ArgumentException("Tile count must at least 1x1");
+			if (!useTiles) throw new System.InvalidOperationException("Cannot resize graph when tiles are not enabled");
 
-			StartBatchTileUpdate();
+			StartBatchTileUpdate(exclusive: true);
 
 			// Create a new tile array and copy the old tiles over, and destroy tiles that are outside the new bounds
 			var newTiles = new NavmeshTile[newTileBounds.Area];
@@ -1247,7 +1315,7 @@ namespace Pathfinding {
 						NavmeshTile tile = tiles[x + z*tileXCount];
 						newTiles[(x - newTileBounds.xmin) + (z - newTileBounds.ymin)*newTileBounds.Width] = tile;
 					} else {
-						ClearTile(x, z);
+						ClearTile(x, z, null);
 
 						// This tile is removed, and that means some off-mesh links may need to be recalculated
 						DirtyBounds(GetTileBounds(x, z));
@@ -1306,7 +1374,7 @@ namespace Pathfinding {
 			this.tileXCount = newTileBounds.Width;
 			this.tileZCount = newTileBounds.Height;
 			EndBatchTileUpdate();
-			this.navmeshUpdateData.OnResized(newTileBounds);
+			this.navmeshUpdateData.OnResized(newTileBounds, new TileLayout(this));
 		}
 
 		/// <summary>Initialize the graph with empty tiles if it is not currently scanned</summary>
@@ -1342,7 +1410,7 @@ namespace Pathfinding {
 		///     TileMeshes tiles = result.tileMeshes.ToManaged();
 		///     // Take the scanned tiles and place them in the graph,
 		///     // but not at their original location, but 2 tiles away, rotated 90 degrees.
-		///     tiles.tileRect = tiles.tileRect.Offset(new Int2(2, 0));
+		///     tiles.tileRect = tiles.tileRect.Offset(new Vector2Int(2, 0));
 		///     tiles.Rotate(1);
 		///     graph.ReplaceTiles(tiles);
 		///
@@ -1394,14 +1462,13 @@ namespace Pathfinding {
 					for (int i = 0; i < tile.verticesInTileSpace.Length; i++) {
 						tile.verticesInTileSpace[i] += offset;
 					}
-					var tileCoordinates = new Int2(x, z) + tileMeshes.tileRect.Min;
+					var tileCoordinates = new Vector2Int(x, z) + tileMeshes.tileRect.Min;
 					ReplaceTile(tileCoordinates.x, tileCoordinates.y, tile.verticesInTileSpace, tile.triangles);
 					updatedTiles[x + z*w] = GetTile(tileCoordinates.x, tileCoordinates.y);
 				}
 			}
 			EndBatchTileUpdate();
 
-			navmeshUpdateData.OnRecalculatedTiles(updatedTiles);
 			if (OnRecalculatedTiles != null) OnRecalculatedTiles(updatedTiles);
 		}
 

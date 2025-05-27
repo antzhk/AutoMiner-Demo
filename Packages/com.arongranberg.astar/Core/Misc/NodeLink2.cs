@@ -3,6 +3,7 @@ using UnityEngine;
 namespace Pathfinding {
 	using Pathfinding.Util;
 	using Pathfinding.Drawing;
+	using Pathfinding.Pooling;
 
 	/// <summary>
 	/// Interface for handling off-mesh links.

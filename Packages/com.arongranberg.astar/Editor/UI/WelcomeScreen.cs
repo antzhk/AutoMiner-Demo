@@ -120,10 +120,19 @@ namespace Pathfinding {
 		bool GetSamples (out UnityEditor.PackageManager.UI.Sample sample) {
 			sample = default;
 
-			var samples = UnityEditor.PackageManager.UI.Sample.FindByPackage("com.arongranberg.astar", "");
-			if (samples == null) {
+			System.Collections.Generic.IEnumerable<UnityEditor.PackageManager.UI.Sample> samples;
+			try {
+				samples = UnityEditor.PackageManager.UI.Sample.FindByPackage("com.arongranberg.astar", "");
+				if (samples == null) {
+					return false;
+				}
+			} catch (System.NullReferenceException) {
+				// The package manager api is buggy, and will throw an exception if the package is not installed
+				// via the package manager.
+				// In any case, we can't import samples if the package is not installed via the package manager.
 				return false;
 			}
+
 			var samplesArr = samples.ToArray();
 			if (samplesArr.Length != 1) {
 				Debug.LogError("Expected exactly 1 sample. Found " + samplesArr.Length + ". This should not happen");
@@ -162,9 +171,8 @@ namespace Pathfinding {
 		void OnAssemblyCompilationFinished (string assembly, CompilerMessage[] message) {
 			for (int i = 0; i < message.Length; i++) {
 				// E.g.
-				// error CS0006: Metadata file 'Assets/AstarPathfindingProject/Plugins/Clipper/Pathfinding.ClipperLib.dll' could not be found
+				// error CS0006: Metadata file 'Assets/AstarPathfindingProject/Plugins/Clipper/Pathfinding.Clipper2Lib.dll' could not be found
 				// error CS0006: Metadata file 'Assets/AstarPathfindingProject/Plugins/DotNetZip/Pathfinding.Ionic.Zip.Reduced.dll' could not be found
-				// error CS0006: Metadata file 'Assets/AstarPathfindingProject/Plugins/Poly2Tri/Pathfinding.Poly2Tri.dll' could not be found
 				// I believe this can happen if the user previously has had the package imported into the Assets folder (e.g. version 4),
 				// and then it is imported via the package manager, and the samples imported.
 				// Unity seems to miss that the dll files now have new locations, and gets confused.

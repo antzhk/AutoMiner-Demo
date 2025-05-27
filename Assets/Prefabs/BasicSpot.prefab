@@ -77,7 +77,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_Sprite: {fileID: -2135585597343286014, guid: 5aa8b770bc43046bc8d993d0d5b7f4a5, type: 3}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0.107794166, g: 1, b: 0, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
@@ -99,8 +99,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: faf4bcbf27c945a0a59d2f868a993596, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  minItemsCount: 4
-  maxItemsCount: 10
+  minItemsCount: 2
+  maxItemsCount: 3
 --- !u!60 &5519712910427049767
 PolygonCollider2D:
   m_ObjectHideFlags: 0

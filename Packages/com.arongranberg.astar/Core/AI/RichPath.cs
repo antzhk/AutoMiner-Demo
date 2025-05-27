@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Pathfinding.Util;
+using Pathfinding.Pooling;
 using UnityEngine.Assertions;
 
 namespace Pathfinding {
@@ -177,7 +178,7 @@ namespace Pathfinding {
 		}
 	}
 
-	public abstract class RichPathPart : Pathfinding.Util.IAstarPooledObject {
+	public abstract class RichPathPart : IAstarPooledObject {
 		public abstract void OnEnterPool();
 	}
 
@@ -198,8 +199,8 @@ namespace Pathfinding {
 		public bool funnelSimplification = true;
 
 		public RichFunnel () {
-			left = Pathfinding.Util.ListPool<Vector3>.Claim();
-			right = Pathfinding.Util.ListPool<Vector3>.Claim();
+			left = Pathfinding.Pooling.ListPool<Vector3>.Claim();
+			right = Pathfinding.Pooling.ListPool<Vector3>.Claim();
 			nodes = new List<TriangleMeshNode>();
 			this.graph = null;
 		}
@@ -548,7 +549,6 @@ namespace Pathfinding {
 
 			range *= range;
 
-			position.y = 0;
 			//Looping as 0,-1,1,-2,2,-3,3,-4,4 etc. Avoids code duplication by keeping it to one loop instead of two
 			for (int i = 0; !negAbort || !posAbort; i = i < 0 ? -i : -i-1) {
 				if (i < 0 && negAbort) continue;
@@ -572,7 +572,9 @@ namespace Pathfinding {
 					break;
 				}
 
-				if ((node.ClosestPointOnNodeXZ(position)-position).sqrMagnitude > range) {
+				var dir = node.ClosestPointOnNodeXZ(position)-position;
+				dir.y = 0;
+				if (dir.sqrMagnitude > range) {
 					if (i < 0) negAbort = true;
 					else posAbort = true;
 					continue;

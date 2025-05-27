@@ -171,11 +171,7 @@ namespace Pathfinding {
 		}
 
 		static void SphereCap (int controlID, Vector3 position, Quaternion rotation, float size) {
-#if UNITY_5_5_OR_NEWER
 			Handles.SphereHandleCap(controlID, position, rotation, size, Event.current.type);
-#else
-			Handles.SphereCap(controlID, position, rotation, size);
-#endif
 		}
 
 		public void OnSceneGUI () {
@@ -190,7 +186,7 @@ namespace Pathfinding {
 				EditorUtility.SetDirty(script);
 			}
 
-			List<Vector3> points = Pathfinding.Util.ListPool<Vector3>.Claim();
+			List<Vector3> points = Pathfinding.Pooling.ListPool<Vector3>.Claim();
 			points.AddRange(script.points);
 
 			Matrix4x4 invMatrix = script.transform.worldToLocalMatrix;
@@ -249,7 +245,7 @@ namespace Pathfinding {
 				float margin = 10;
 
 				AstarPathEditor.LoadStyles();
-				GUILayout.BeginArea(new Rect(Camera.current.pixelWidth - width, Camera.current.pixelHeight - height, width - margin, height - margin), "Shortcuts", AstarPathEditor.astarSkin.FindStyle("SceneBoxDark"));
+				GUILayout.BeginArea(new Rect(Camera.current.pixelWidth / EditorGUIUtility.pixelsPerPoint - width, Camera.current.pixelHeight / EditorGUIUtility.pixelsPerPoint - height, width - margin, height - margin), "Shortcuts", AstarPathEditor.astarSkin.FindStyle("SceneBoxDark"));
 
 				GUILayout.Label("Shift+Click: Add new point", darkSkin.label);
 				GUILayout.Label("Backspace: Delete selected point", darkSkin.label);
@@ -339,7 +335,7 @@ namespace Pathfinding {
 
 			// Make sure the convex hull stays up to date
 			script.RecalcConvex();
-			Pathfinding.Util.ListPool<Vector3>.Release(ref points);
+			Pathfinding.Pooling.ListPool<Vector3>.Release(ref points);
 
 			if (GUI.changed) HandleUtility.Repaint();
 		}

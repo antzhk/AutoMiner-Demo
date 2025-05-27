@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using Pathfinding.Graphs.Navmesh.Jobs;
 using Pathfinding.Jobs;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
+using Pathfinding.Sync;
 using Pathfinding.Graphs.Navmesh.Voxelization.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -54,7 +55,7 @@ namespace Pathfinding.Graphs.Navmesh {
 			}
 
 			public void Dispose () {
-				tileMeshes.Dispose();
+				tileMeshes.Dispose(Allocator.Persistent);
 				if (currentTileCounter.IsCreated) currentTileCounter.Dispose();
 #if UNITY_EDITOR
 				if (meshesUnreadableAtRuntime != null) ListPool<(UnityEngine.Object, Mesh)>.Release(ref meshesUnreadableAtRuntime);
@@ -116,7 +117,7 @@ namespace Pathfinding.Graphs.Navmesh {
 			} else {
 				mask = -1;
 			}
-			var meshGatherer = new RecastMeshGatherer(scene, bounds, collectionSettings.terrainHeightmapDownsamplingFactor, collectionSettings.layerMask, collectionSettings.tagMask, perLayerModifications, tileLayout.cellSize / collectionSettings.colliderRasterizeDetail);
+			var meshGatherer = new RecastMeshGatherer(scene, bounds, collectionSettings.terrainHeightmapDownsamplingFactor, mask, collectionSettings.tagMask, perLayerModifications, tileLayout.cellSize / collectionSettings.colliderRasterizeDetail);
 
 			if (collectionSettings.rasterizeMeshes && dimensionMode == RecastGraph.DimensionMode.Dimension3D) {
 				Profiler.BeginSample("Find meshes");
@@ -124,14 +125,14 @@ namespace Pathfinding.Graphs.Navmesh {
 				Profiler.EndSample();
 			}
 
-			Profiler.BeginSample("Find RecastMeshObj components");
-			meshGatherer.CollectRecastMeshObjs();
+			Profiler.BeginSample("Find RecastNavmeshModifiers");
+			meshGatherer.CollectRecastNavmeshModifiers();
 			Profiler.EndSample();
 
 			if (collectionSettings.rasterizeTerrain && dimensionMode == RecastGraph.DimensionMode.Dimension3D) {
 				Profiler.BeginSample("Find terrains");
-				// Split terrains up into meshes approximately the size of a single chunk
-				var desiredTerrainChunkSize = tileLayout.cellSize*math.max(tileLayout.tileSizeInVoxels.x, tileLayout.tileSizeInVoxels.y);
+				// Split terrains up into meshes approximately the size of a single tile
+				var desiredTerrainChunkSize = 0.51f * tileLayout.cellSize*(math.max(tileLayout.tileSizeInVoxels.x, tileLayout.tileSizeInVoxels.y) + 2*TileBorderSizeInVoxels);
 				meshGatherer.CollectTerrainMeshes(collectionSettings.rasterizeTrees, desiredTerrainChunkSize);
 				Profiler.EndSample();
 			}

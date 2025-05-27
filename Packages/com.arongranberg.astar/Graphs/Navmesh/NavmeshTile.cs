@@ -1,6 +1,9 @@
+using Unity.Collections;
+using Unity.Profiling;
+
 namespace Pathfinding.Graphs.Navmesh {
 	using Pathfinding.Util;
-	using Unity.Collections;
+	using Pathfinding.Collections;
 
 	/// <summary>
 	/// A single tile in a recast or navmesh graph.
@@ -31,6 +34,17 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// This represents an allocation using the Persistent allocator.
 		/// </summary>
 		public UnsafeSpan<int> tris;
+
+		/// <summary>
+		/// True if this tile may have been cut by <see cref="NavmeshCut"/>s, or had pieces added by <see cref="NavmeshAdd"/> components.
+		///
+		/// If true, the <see cref="preCutVertsInTileSpace"/>, <see cref="preCutTris"/> and <see cref="preCutTags"/> fields will be valid.
+		/// </summary>
+		public bool isCut;
+		public UnsafeSpan<Int3> preCutVertsInTileSpace;
+		public UnsafeSpan<int> preCutTris;
+		public UnsafeSpan<uint> preCutTags;
+
 
 		/// <summary>Tile X Coordinate</summary>
 		public int x;
@@ -80,6 +94,7 @@ namespace Pathfinding.Graphs.Navmesh {
 			return verts[idx];
 		}
 
+		[IgnoredByDeepProfiler]
 		public Int3 GetVertexInGraphSpace (int index) {
 			return vertsInGraphSpace[index & NavmeshBase.VertexIndexMask];
 		}
@@ -100,6 +115,17 @@ namespace Pathfinding.Graphs.Navmesh {
 				vertsInGraphSpace.Free(Allocator.Persistent);
 				verts.Free(Allocator.Persistent);
 				tris.Free(Allocator.Persistent);
+				preCutTags.Free(Allocator.Persistent);
+				preCutVertsInTileSpace.Free(Allocator.Persistent);
+				preCutTris.Free(Allocator.Persistent);
+				// Ensure Dispose is idempotent
+				vertsInGraphSpace = default;
+				verts = default;
+				tris = default;
+				preCutTags = default;
+				preCutVertsInTileSpace = default;
+				preCutTris = default;
+				isCut = false;
 			}
 		}
 	}

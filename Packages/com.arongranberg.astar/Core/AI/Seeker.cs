@@ -16,6 +16,7 @@ namespace Pathfinding {
 	/// See: modifiers (view in online documentation for working links)
 	/// </summary>
 	[AddComponentMenu("Pathfinding/Seeker")]
+	[DisallowMultipleComponent]
 	[HelpURL("https://arongranberg.com/astar/documentation/stable/seeker.html")]
 	public class Seeker : VersionedMonoBehaviour {
 		/// <summary>
@@ -272,7 +273,7 @@ namespace Pathfinding {
 		}
 
 		/// <summary>
-		/// Post Processes the path.
+		/// Post-processes a path.
 		/// This will run any modifiers attached to this GameObject on the path.
 		/// This is identical to calling RunModifiers(ModifierPass.PostProcess, path)
 		/// See: <see cref="RunModifiers"/>
@@ -318,7 +319,7 @@ namespace Pathfinding {
 
 		/// <summary>
 		/// Called when a path has completed.
-		/// Will post process it and return it by calling <see cref="tmpPathCallback"/> and <see cref="pathCallback"/>
+		/// Will post process it and return it by calling <see cref="tmpPathCallback"/>
 		/// </summary>
 		void OnPathComplete (Path p, bool runModifiers, bool sendCallbacks) {
 			if (p != null && p != path && sendCallbacks) {
@@ -495,7 +496,7 @@ namespace Pathfinding {
 		/// <param name="start">The start point of the path</param>
 		/// <param name="end">The end point of the path</param>
 		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
-		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See #Pathfinding.NNConstraint.graphMask. This will override #graphMask for this path request.</param>
+		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See #Pathfinding.NNConstraint.graphMask. This will override the #graphMask on this Seeker.</param>
 		public Path StartPath (Vector3 start, Vector3 end, OnPathDelegate callback, GraphMask graphMask) {
 			return StartPath(ABPath.Construct(start, end, null), callback, graphMask);
 		}
@@ -538,14 +539,14 @@ namespace Pathfinding {
 		}
 
 		/// <summary>
-		/// Call this function to start calculating a path.
+		/// Queue a path to be calculated.
 		///
 		/// The callback will be called when the path has been calculated (which may be several frames into the future).
 		/// The callback will not be called if a new path request is started before this path request has been calculated.
 		/// </summary>
 		/// <param name="p">The path to start calculating</param>
 		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
-		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See #Pathfinding.GraphMask. This will override #graphMask for this path request.</param>
+		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See \reflink{GraphMask}.  This will override the #graphMask on this Seeker.</param>
 		public Path StartPath (Path p, OnPathDelegate callback, GraphMask graphMask) {
 			p.nnConstraint.graphMask = graphMask;
 			StartPathInternal(p, callback);
@@ -601,7 +602,7 @@ namespace Pathfinding {
 		/// Starts a Multi Target Path from one start point to multiple end points.
 		/// A Multi Target Path will search for all the end points in one search and will return all paths if pathsForAll is true, or only the shortest one if pathsForAll is false.
 		///
-		/// callback and <see cref="pathCallback"/> will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
+		/// callback will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
 		///
 		/// See: Pathfinding.MultiTargetPath
 		/// See: MultiTargetPathExample.cs (view in online documentation for working links) "Example of how to use multi-target-paths"
@@ -642,9 +643,78 @@ namespace Pathfinding {
 		/// <param name="endPoints">The end points of the path</param>
 		/// <param name="pathsForAll">Indicates whether or not a path to all end points should be searched for or only to the closest one</param>
 		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
-		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See Pathfinding.NNConstraint.graphMask.</param>
-		public MultiTargetPath StartMultiTargetPath (Vector3 start, Vector3[] endPoints, bool pathsForAll, OnPathDelegate callback, int graphMask = -1) {
+		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See Pathfinding.NNConstraint.graphMask. This will override the #graphMask on this Seeker.</param>
+		public MultiTargetPath StartMultiTargetPath (Vector3 start, Vector3[] endPoints, bool pathsForAll, OnPathDelegate callback, GraphMask graphMask) {
 			MultiTargetPath p = MultiTargetPath.Construct(start, endPoints, null, null);
+
+			p.pathsForAll = pathsForAll;
+			StartPath(p, callback, graphMask);
+			return p;
+		}
+
+		/// <summary>
+		/// Starts a Multi Target Path from one start point to multiple end points.
+		/// A Multi Target Path will search for all the end points in one search and will return all paths if pathsForAll is true, or only the shortest one if pathsForAll is false.
+		///
+		/// callback will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
+		///
+		/// See: Pathfinding.MultiTargetPath
+		/// See: MultiTargetPathExample.cs (view in online documentation for working links) "Example of how to use multi-target-paths"
+		///
+		/// <code>
+		/// var endPoints = new Vector3[] {
+		///     transform.position + Vector3.forward * 5,
+		///     transform.position + Vector3.right * 10,
+		///     transform.position + Vector3.back * 15
+		/// };
+		/// // Start a multi target path, where endPoints is a Vector3[] array.
+		/// // The pathsForAll parameter specifies if a path to every end point should be searched for
+		/// // or if it should only try to find the shortest path to any end point.
+		/// var path = seeker.StartMultiTargetPath(transform.position, endPoints, pathsForAll: true, callback: null);
+		/// path.BlockUntilCalculated();
+		///
+		/// if (path.error) {
+		///     Debug.LogError("Error calculating path: " + path.errorLog);
+		///     return;
+		/// }
+		///
+		/// Debug.Log("The closest target was index " + path.chosenTarget);
+		///
+		/// // Draw the path to all targets
+		/// foreach (var subPath in path.vectorPaths) {
+		///     for (int i = 0; i < subPath.Count - 1; i++) {
+		///         Debug.DrawLine(subPath[i], subPath[i+1], Color.green, 10);
+		///     }
+		/// }
+		///
+		/// // Draw the path to the closest target
+		/// for (int i = 0; i < path.vectorPath.Count - 1; i++) {
+		///     Debug.DrawLine(path.vectorPath[i], path.vectorPath[i+1], Color.red, 10);
+		/// }
+		/// </code>
+		/// </summary>
+		/// <param name="start">The start point of the path</param>
+		/// <param name="endPoints">The end points of the path</param>
+		/// <param name="pathsForAll">Indicates whether or not a path to all end points should be searched for or only to the closest one</param>
+		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
+		public MultiTargetPath StartMultiTargetPath(Vector3 start, Vector3[] endPoints, bool pathsForAll, OnPathDelegate callback) => StartMultiTargetPath(start, endPoints, pathsForAll, callback, graphMask);
+
+		/// <summary>
+		/// Starts a Multi Target Path from multiple start points to a single target point.
+		/// A Multi Target Path will search from all start points to the target point in one search and will return all paths if pathsForAll is true, or only the shortest one if pathsForAll is false.
+		///
+		/// callback will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
+		///
+		/// See: Pathfinding.MultiTargetPath
+		/// See: MultiTargetPathExample.cs (view in online documentation for working links) "Example of how to use multi-target-paths"
+		/// </summary>
+		/// <param name="startPoints">The start points of the path</param>
+		/// <param name="end">The end point of the path</param>
+		/// <param name="pathsForAll">Indicates whether or not a path from all start points should be searched for or only to the closest one</param>
+		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
+		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See Pathfinding.NNConstraint.graphMask. This will override the #graphMask on this Seeker.</param>
+		public MultiTargetPath StartMultiTargetPath (Vector3[] startPoints, Vector3 end, bool pathsForAll, OnPathDelegate callback, GraphMask graphMask) {
+			MultiTargetPath p = MultiTargetPath.Construct(startPoints, end, null, null);
 
 			p.pathsForAll = pathsForAll;
 			StartPath(p, callback, graphMask);
@@ -655,7 +725,7 @@ namespace Pathfinding {
 		/// Starts a Multi Target Path from multiple start points to a single target point.
 		/// A Multi Target Path will search from all start points to the target point in one search and will return all paths if pathsForAll is true, or only the shortest one if pathsForAll is false.
 		///
-		/// callback and <see cref="pathCallback"/> will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
+		/// callback will be called when the path has completed. Callback will not be called if the path is canceled (e.g when a new path is requested before the previous one has completed)
 		///
 		/// See: Pathfinding.MultiTargetPath
 		/// See: MultiTargetPathExample.cs (view in online documentation for working links) "Example of how to use multi-target-paths"
@@ -664,14 +734,7 @@ namespace Pathfinding {
 		/// <param name="end">The end point of the path</param>
 		/// <param name="pathsForAll">Indicates whether or not a path from all start points should be searched for or only to the closest one</param>
 		/// <param name="callback">The function to call when the path has been calculated. If you don't want a callback (e.g. if you instead poll path.IsDone or use a similar method) you can set this to null.</param>
-		/// <param name="graphMask">Mask used to specify which graphs should be searched for close nodes. See Pathfinding.NNConstraint.graphMask.</param>
-		public MultiTargetPath StartMultiTargetPath (Vector3[] startPoints, Vector3 end, bool pathsForAll, OnPathDelegate callback, int graphMask = -1) {
-			MultiTargetPath p = MultiTargetPath.Construct(startPoints, end, null, null);
-
-			p.pathsForAll = pathsForAll;
-			StartPath(p, callback, graphMask);
-			return p;
-		}
+		public MultiTargetPath StartMultiTargetPath(Vector3[] startPoints, Vector3 end, bool pathsForAll, OnPathDelegate callback) => StartMultiTargetPath(startPoints, end, pathsForAll, callback, graphMask);
 
 #if UNITY_EDITOR
 		/// <summary>Draws gizmos for the Seeker</summary>

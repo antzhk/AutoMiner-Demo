@@ -83,9 +83,7 @@ namespace Pathfinding.RVO {
 				public float densityThreshold;
 			}
 
-			public JobDensityCheck(int size, float deltaTime) {
-				var simulator = RVOSimulator.active.GetSimulator() as SimulatorBurst;
-
+			public JobDensityCheck(int size, float deltaTime, SimulatorBurst simulator) {
 				agentPosition = simulator.simulationData.position;
 				agentTargetPoint = simulator.simulationData.targetPoint;
 				agentRadius = simulator.simulationData.radius;

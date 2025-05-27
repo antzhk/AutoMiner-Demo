@@ -15,12 +15,13 @@ namespace Pathfinding.ECS {
 			int updateIndex;
 			float stepDt;
 			float maximumDt = 1.0f / 30.0f;
+			float ownProcessingTimePerIteration = 0;
 			NativeList<TimeData> cheapTimeDataQueue;
 			NativeList<TimeData> timeDataQueue;
 			double lastFullSimulation;
 			double lastCheapSimulation;
 			static bool cheapSimulationOnly;
-			static bool isLastSubstep;
+			static bool isLastSubstep, isFirstSubstep;
 			static bool inGroup;
 			static TimeData cheapTimeData;
 
@@ -51,6 +52,16 @@ namespace Pathfinding.ECS {
 				}
 			}
 
+			/// <summary>True when this is the first substep of the current simulation</summary>
+			public static bool IsFirstSubstep {
+				get {
+					if (!inGroup) throw new System.InvalidOperationException("Cannot call this method outside of a simulation group using TimeScaledRateManager");
+					return isFirstSubstep;
+				}
+			}
+
+			public int NumUpdatesThisFrame => numUpdatesThisFrame;
+
 			public TimeScaledRateManager () {
 				cheapTimeDataQueue = new NativeList<TimeData>(Allocator.Persistent);
 				timeDataQueue = new NativeList<TimeData>(Allocator.Persistent);
@@ -59,6 +70,12 @@ namespace Pathfinding.ECS {
 			public void Dispose () {
 				cheapTimeDataQueue.Dispose();
 				timeDataQueue.Dispose();
+			}
+
+			public void OnSimulationStepsFinished (float totalSimulationProcessingTime) {
+				if (cheapSimulationOnly) return;
+
+				ownProcessingTimePerIteration = totalSimulationProcessingTime / numUpdatesThisFrame;
 			}
 
 			public bool ShouldGroupUpdate (ComponentSystemGroup group) {
@@ -89,7 +106,11 @@ namespace Pathfinding.ECS {
 					// the time it takes to run the simulation is longer than maximumDt. Otherwise the number of
 					// simulation sub-steps would increase without bound. However, the simulation quality
 					// may decrease a bit as the number of sub-steps increases.
-					numUpdatesThisFrame = Mathf.FloorToInt(Mathf.Pow(fullDt / maximumDt, 0.8f));
+					//
+					// If the time it takes to run a single iteration grows too large,
+					// the number of simulation steps will also be reduced. In the limit where the simulation
+					// takes up essentially the whole frame's cpu time, then we only do 1 simulation step per frame.
+					numUpdatesThisFrame = Mathf.FloorToInt(Mathf.Pow(fullDt / (maximumDt + ownProcessingTimePerIteration), 0.8f));
 					var currentTime = group.World.Time.ElapsedTime;
 					cheapSimulationOnly = numUpdatesThisFrame == 0;
 					if (cheapSimulationOnly) {
@@ -127,6 +148,7 @@ namespace Pathfinding.ECS {
 				group.World.PushTime(timeDataQueue[updateIndex]);
 				cheapTimeData = cheapTimeDataQueue[updateIndex];
 				isLastSubstep = updateIndex + 1 >= numUpdatesThisFrame;
+				isFirstSubstep = updateIndex == 0;
 
 				return true;
 			}
@@ -162,7 +184,12 @@ namespace Pathfinding.ECS {
 			}
 #endif
 
+			var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
 			base.OnUpdate();
+			var t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+			var rateManager = RateManager as TimeScaledRateManager;
+			var timePerSimulationStep = (t2 - t1) / (rateManager.NumUpdatesThisFrame * (double)System.Diagnostics.Stopwatch.Frequency);
+			rateManager.OnSimulationStepsFinished((float)((t2 - t1) / (double)System.Diagnostics.Stopwatch.Frequency));
 
 			JobHandle readDependency = default;
 #if MODULE_ENTITIES_1_0_8_OR_NEWER

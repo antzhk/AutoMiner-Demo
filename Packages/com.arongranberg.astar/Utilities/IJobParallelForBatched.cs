@@ -12,7 +12,7 @@ namespace Pathfinding.Jobs {
 		void Execute(int startIndex, int count);
 	}
 
-	public static class JobParallelForBatchedExtensions {
+	static class JobParallelForBatchedExtensions {
 		internal struct ParallelForBatchJobStruct<T> where T : struct, IJobParallelForBatched {
 			static public IntPtr jobReflectionData;
 

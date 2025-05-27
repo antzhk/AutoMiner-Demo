@@ -26,53 +26,16 @@ namespace Pathfinding.ECS {
 	public partial struct AIMoveSystem : ISystem {
 		EntityQuery entityQueryPrepareMovement;
 		EntityQuery entityQueryWithGravity;
-		EntityQuery entityQueryMove;
-		EntityQuery entityQueryRotation;
 		EntityQuery entityQueryGizmos;
 		EntityQuery entityQueryMovementOverride;
 		JobRepairPath.Scheduler jobRepairPathScheduler;
 		ComponentTypeHandle<MovementState> MovementStateTypeHandleRO;
 		ComponentTypeHandle<ResolvedMovement> ResolvedMovementHandleRO;
 
-		public static EntityQueryBuilder EntityQueryPrepareMovement () {
-			return new EntityQueryBuilder(Allocator.Temp)
-				   .WithAllRW<MovementState>()
-				   .WithAllRW<ManagedState>()
-				   .WithAllRW<LocalTransform>()
-				   .WithAll<MovementSettings, DestinationPoint, AgentMovementPlane, AgentCylinderShape>()
-			       //    .WithAny<ReadyToTraverseOffMeshLink>() // TODO: Use WithPresent in newer versions
-				   .WithAbsent<AgentOffMeshLinkTraversal>();
-		}
-
 		public void OnCreate (ref SystemState state) {
 			jobRepairPathScheduler = new JobRepairPath.Scheduler(ref state);
 			MovementStateTypeHandleRO = state.GetComponentTypeHandle<MovementState>(true);
 			ResolvedMovementHandleRO = state.GetComponentTypeHandle<ResolvedMovement>(true);
-
-			entityQueryRotation = state.GetEntityQuery(
-				ComponentType.ReadWrite<LocalTransform>(),
-				ComponentType.ReadOnly<MovementSettings>(),
-				ComponentType.ReadOnly<MovementState>(),
-				ComponentType.ReadOnly<AgentCylinderShape>(),
-				ComponentType.ReadOnly<AgentMovementPlane>(),
-				ComponentType.ReadOnly<MovementControl>(),
-				ComponentType.ReadWrite<ResolvedMovement>(),
-				ComponentType.ReadOnly<SimulateMovement>(),
-				ComponentType.ReadOnly<SimulateMovementFinalize>()
-				);
-
-			entityQueryMove = state.GetEntityQuery(
-				ComponentType.ReadWrite<LocalTransform>(),
-				ComponentType.ReadOnly<AgentCylinderShape>(),
-				ComponentType.ReadOnly<AgentMovementPlane>(),
-				ComponentType.ReadWrite<MovementState>(),
-				ComponentType.ReadOnly<MovementSettings>(),
-				ComponentType.ReadOnly<ResolvedMovement>(),
-				ComponentType.ReadWrite<MovementStatistics>(),
-
-				ComponentType.ReadOnly<SimulateMovement>(),
-				ComponentType.ReadOnly<SimulateMovementFinalize>()
-				);
 
 			entityQueryWithGravity = state.GetEntityQuery(
 				ComponentType.ReadWrite<LocalTransform>(),
@@ -84,6 +47,12 @@ namespace Pathfinding.ECS {
 				ComponentType.ReadWrite<MovementStatistics>(),
 				ComponentType.ReadOnly<MovementControl>(),
 				ComponentType.ReadWrite<GravityState>(),
+				ComponentType.ReadOnly<PhysicsSceneRef>(),
+
+				// When in 2D mode, gravity is always disabled
+				ComponentType.Exclude<OrientationYAxisForward>(),
+
+				ComponentType.Exclude<AgentOffMeshLinkMovementDisabled>(),
 
 				ComponentType.ReadOnly<AgentMovementPlaneSource>(),
 				ComponentType.ReadOnly<SimulateMovement>(),
@@ -140,14 +109,14 @@ namespace Pathfinding.ECS {
 
 			systemState.Dependency = new JobAlignAgentWithMovementDirection {
 				dt = dt,
-			}.Schedule(entityQueryRotation, systemState.Dependency);
+			}.Schedule(systemState.Dependency);
 
 			RunMovementOverrideBeforeMovement(ref systemState, dt);
 
 			// Move all agents which do not have a GravityState component
 			systemState.Dependency = new JobMoveAgent {
 				dt = dt,
-			}.ScheduleParallel(entityQueryMove, systemState.Dependency);
+			}.ScheduleParallel(systemState.Dependency);
 
 			ScheduleApplyGravity(ref systemState, draw, dt);
 			var gizmosDependency = systemState.Dependency;
@@ -167,6 +136,7 @@ namespace Pathfinding.ECS {
 			draw.DisposeAfter(gizmosDependency);
 			systemState.Dependency = ScheduleSyncEntitiesToTransforms(ref systemState, systemState.Dependency);
 			systemState.Dependency = JobHandle.CombineDependencies(systemState.Dependency, gizmosDependency);
+			systemState.Dependency = new JobClearTemporaryData().Schedule(systemState.Dependency);
 		}
 
 		void ScheduleApplyGravity (ref SystemState systemState, CommandBuilder draw, float dt) {

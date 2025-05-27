@@ -11,8 +11,6 @@ namespace Pathfinding {
 	/// Connects two nodes with a direct connection.
 	/// It is not possible to detect this link when following a path (which may be good or bad), for that you can use NodeLink2.
 	///
-	/// [Open online documentation to see images]
-	///
 	/// See: editing-graphs (view in online documentation for working links)
 	/// </summary>
 	[AddComponentMenu("Pathfinding/Link")]

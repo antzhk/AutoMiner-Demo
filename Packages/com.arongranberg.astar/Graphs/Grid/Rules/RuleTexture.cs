@@ -14,6 +14,10 @@ namespace Pathfinding.Graphs.Grid.Rules {
 	///
 	/// [Open online documentation to see images]
 	///
+	/// This rule will pick up changes made to the texture during runtime, assuming the <code> Texture.imageContentsHash </code> property is changed.
+	/// This is not always done automatically, so you may have to e.g. increment that property manually if you are doing changes to the texture via code.
+	/// Any changes will be applied when the graph is scanned, or a graph update is performed.
+	///
 	/// See: grid-rules (view in online documentation for working links)
 	/// </summary>
 	[Pathfinding.Util.Preserve]
@@ -35,7 +39,7 @@ namespace Pathfinding.Graphs.Grid.Rules {
 
 		public override int Hash {
 			get {
-				var h = base.Hash ^ (texture != null ? (int)texture.updateCount : 0);
+				var h = base.Hash ^ (texture != null ? (31 * texture.GetInstanceID()) ^ (int)texture.updateCount : 0);
 #if UNITY_EDITOR
 				if (texture != null) h ^= (int)texture.imageContentsHash.GetHashCode();
 #endif

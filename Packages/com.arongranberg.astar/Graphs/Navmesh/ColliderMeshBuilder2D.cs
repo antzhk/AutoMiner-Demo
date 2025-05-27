@@ -7,12 +7,13 @@ using Unity.Burst;
 using UnityEngine.Assertions;
 using UnityEngine.Profiling;
 using Pathfinding.Util;
+using Pathfinding.Collections;
 using UnityEngine.Tilemaps;
 
 
 namespace Pathfinding.Graphs.Navmesh {
 	[BurstCompile]
-	public struct CircleGeometryUtilities {
+	struct CircleGeometryUtilities {
 		/// <summary>
 		/// Cached values for CircleRadiusAdjustmentFactor.
 		///
@@ -69,7 +70,29 @@ namespace Pathfinding.Graphs.Navmesh {
 	}
 
 	[BurstCompile]
-	public static class ColliderMeshBuilder2D {
+	internal static class ColliderMeshBuilder2D {
+		static int GetShapes (Collider2D coll, PhysicsShapeGroup2D group, HashSet<Rigidbody2D> handledRigidbodies) {
+#if !UNITY_6000_0_OR_NEWER
+			var rigid = coll.attachedRigidbody;
+			if (rigid != null) {
+				if (handledRigidbodies.Add(rigid)) {
+					// Trying to get the shapes from a collider that is attached to a rigidbody will log annoying errors (this seems like a Unity bug tbh),
+					// so we must call GetShapes on the rigidbody instead.
+					// Not quite sure which version of Unity stopped logging these errors, but they don't seem to be present in Unity 6 anymore.
+					return rigid.GetShapes(group);
+				} else {
+					return 0;
+				}
+			}
+#endif
+
+			if (coll is TilemapCollider2D tilemapColl) {
+				// Ensure the tilemap is up to date
+				tilemapColl.ProcessTilemapChanges();
+			}
+			return coll.GetShapes(group);
+		}
+
 		public static int GenerateMeshesFromColliders (Collider2D[] colliders, int numColliders, float maxError, out NativeArray<float3> outputVertices, out NativeArray<int> outputIndices, out NativeArray<ShapeMesh> outputShapeMeshes) {
 			var group = new PhysicsShapeGroup2D();
 			var shapeList = new NativeList<PhysicsShape2D>(numColliders, Allocator.Temp);
@@ -79,7 +102,12 @@ namespace Pathfinding.Graphs.Navmesh {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 			var tempHandle = AtomicSafetyHandle.GetTempMemoryHandle();
 #endif
+#if UNITY_6000_0_OR_NEWER
+			HashSet<Rigidbody2D> handledRigidbodies = null;
+#else
 			var handledRigidbodies = new HashSet<Rigidbody2D>();
+#endif
+
 			Profiler.BeginSample("GetShapes");
 
 			// Get the low level physics shapes from all colliders
@@ -89,21 +117,9 @@ namespace Pathfinding.Graphs.Navmesh {
 				// Prevent errors from being logged when calling GetShapes on a collider that has no shapes
 				if (coll == null || coll.shapeCount == 0) continue;
 
-				var rigid = coll.attachedRigidbody;
-				int shapeCount;
-				if (rigid == null) {
-					if (coll is TilemapCollider2D tilemapColl) {
-						// Ensure the tilemap is up to date
-						tilemapColl.ProcessTilemapChanges();
-					}
-					shapeCount = coll.GetShapes(group);
-				} else if (handledRigidbodies.Add(rigid)) {
-					// Trying to get the shapes from a collider that is attached to a rigidbody will log annoying errors (this seems like a Unity bug tbh),
-					// so we must call GetShapes on the rigidbody instead.
-					shapeCount = rigid.GetShapes(group);
-				} else {
-					continue;
-				}
+				var shapeCount = GetShapes(coll, group, handledRigidbodies);
+				if (shapeCount == 0) continue;
+
 				shapeList.Length += shapeCount;
 				verticesList.Length += group.vertexCount;
 				var subShapes = shapeList.AsArray().GetSubArray(shapeList.Length - shapeCount, shapeCount);

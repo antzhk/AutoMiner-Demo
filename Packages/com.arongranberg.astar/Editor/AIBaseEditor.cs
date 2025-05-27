@@ -134,7 +134,7 @@ namespace Pathfinding {
 			mono.TryGetComponent<Rigidbody>(out Rigidbody rigid);
 			mono.TryGetComponent<Rigidbody2D>(out Rigidbody2D rigid2D);
 			mono.TryGetComponent<CharacterController>(out CharacterController controller);
-			var canUseGravity = (controller != null && controller.enabled) || ((rigid == null || rigid.isKinematic) && (rigid2D == null || rigid2D.isKinematic));
+			var canUseGravity = (controller != null && controller.enabled) || ((rigid == null || rigid.isKinematic) && (rigid2D == null || rigid2D.bodyType == RigidbodyType2D.Kinematic));
 
 			var gravity = FindProperty("gravity");
 			var groundMask = FindProperty("groundMask");
@@ -180,7 +180,7 @@ namespace Pathfinding {
 			}
 
 			var isRichAI = typeof(RichAI).IsAssignableFrom(target.GetType());
-			if (isRichAI && Application.isPlaying && AstarPath.active != null && AstarPath.active.graphs.Length > 0 && AstarPath.active.data.recastGraph == null && AstarPath.active.data.navmesh == null) {
+			if (isRichAI && Application.isPlaying && AstarPath.active != null && AstarPath.active.graphs.Length > 0 && AstarPath.active.data.recastGraph == null && AstarPath.active.data.navmeshGraph == null) {
 				EditorGUILayout.HelpBox("This script only works with a navmesh or recast graph. If you are using some other graph type you might want to use another movement script.", MessageType.Warning);
 			}
 		}

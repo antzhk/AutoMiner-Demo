@@ -9,12 +9,31 @@ using GCHandle = System.Runtime.InteropServices.GCHandle;
 
 namespace Pathfinding.ECS.RVO {
 	using Pathfinding.RVO;
+	using Unity.Jobs;
 
+	/// <summary>
+	/// Simulates local avoidance in an ECS context.
+	///
+	/// All agent entities must have the following ECS components:
+	/// - LocalTransform
+	/// - <see cref="AgentCylinderShape"/>
+	/// - <see cref="AgentMovementPlane"/>
+	/// - <see cref="RVOAgent"/>
+	/// - <see cref="MovementControl"/>: where you store how you want the agent to move
+	/// - <see cref="ResolvedMovement"/>: where this system will output how the agent should move, when using RVO
+	///
+	/// The system will use the data from <see cref="MovementControl"/>, and output the following fields to <see cref="ResolvedMovement"/>:
+	///
+	/// <see cref="ResolvedMovement.targetPoint"/>: Where the agent should move to.
+	/// <see cref="ResolvedMovement.speed"/>: At what speed the agent should move, in world units.
+	/// <see cref="ResolvedMovement.turningRadiusMultiplier"/>: This will go up if its more crowded, to indicate that the agent should try to take wider turns to improve crowd flow.
+	///
+	/// The <see cref="AgentIndex"/> component will be added to the agent automatically by this system. You do not need to care about it.
+	/// </summary>
 	[BurstCompile]
 	[UpdateAfter(typeof(FollowerControlSystem))]
 	[UpdateInGroup(typeof(AIMovementSystemGroup))]
 	public partial struct RVOSystem : ISystem {
-		EntityQuery entityQuery;
 		/// <summary>
 		/// Keeps track of the last simulator that this RVOSystem saw.
 		/// This is a weak GCHandle to allow it to be stored in an ISystem.
@@ -26,16 +45,6 @@ namespace Pathfinding.ECS.RVO {
 		ComponentLookup<AgentOffMeshLinkTraversal> agentOffMeshLinkTraversalLookup;
 
 		public void OnCreate (ref SystemState state) {
-			entityQuery = state.GetEntityQuery(
-				ComponentType.ReadOnly<AgentCylinderShape>(),
-				ComponentType.ReadOnly<LocalTransform>(),
-				ComponentType.ReadOnly<RVOAgent>(),
-				ComponentType.ReadOnly<AgentIndex>(),
-				ComponentType.ReadOnly<AgentMovementPlane>(),
-				ComponentType.ReadOnly<MovementControl>(),
-				ComponentType.ReadWrite<ResolvedMovement>(),
-				ComponentType.ReadOnly<SimulateMovement>()
-				);
 			withAgentIndex = state.GetEntityQuery(
 				ComponentType.ReadWrite<AgentIndex>()
 				);
@@ -75,7 +84,7 @@ namespace Pathfinding.ECS.RVO {
 			CopyFromEntitiesToRVOSimulator(ref systemState, simulator, SystemAPI.Time.DeltaTime);
 
 			// Schedule RVO update
-			systemState.Dependency = simulator.Update(
+			simulator.Update(
 				systemState.Dependency,
 				SystemAPI.Time.DeltaTime,
 				AIMovementSystemGroup.TimeScaledRateManager.IsLastSubstep,
@@ -83,7 +92,6 @@ namespace Pathfinding.ECS.RVO {
 				);
 
 			CopyFromRVOSimulatorToEntities(ref systemState, simulator);
-			simulator.LockSimulationDataReadOnly(systemState.Dependency);
 		}
 
 		void RemoveAllAgentsFromSimulation (ref SystemState systemState) {
@@ -121,21 +129,25 @@ namespace Pathfinding.ECS.RVO {
 
 		void CopyFromEntitiesToRVOSimulator (ref SystemState systemState, SimulatorBurst simulator, float dt) {
 			agentOffMeshLinkTraversalLookup.Update(ref systemState);
+			var writeLock = simulator.LockSimulationDataReadWrite();
 			systemState.Dependency = new JobCopyFromEntitiesToRVOSimulator {
 				agentData = simulator.simulationData,
 				agentOutputData = simulator.outputData,
 				movementPlaneMode = simulator.movementPlane,
 				agentOffMeshLinkTraversalLookup = agentOffMeshLinkTraversalLookup,
 				dt = dt,
-			}.ScheduleParallel(entityQuery, systemState.Dependency);
+			}.ScheduleParallel(JobHandle.CombineDependencies(writeLock.dependency, systemState.Dependency));
+			writeLock.UnlockAfter(systemState.Dependency);
 		}
 
 		void CopyFromRVOSimulatorToEntities (ref SystemState systemState, SimulatorBurst simulator) {
+			var writeLock = simulator.LockSimulationDataReadWrite();
 			systemState.Dependency = new JobCopyFromRVOSimulatorToEntities {
 				quadtree = simulator.quadtree,
-				agentData = simulator.simulationData,
+				agentDataVersions = simulator.simulationData.version,
 				agentOutputData = simulator.outputData,
-			}.ScheduleParallel(entityQuery, systemState.Dependency);
+			}.ScheduleParallel(JobHandle.CombineDependencies(writeLock.dependency, systemState.Dependency));
+			writeLock.UnlockAfter(systemState.Dependency);
 		}
 
 		[BurstCompile]
@@ -151,9 +163,7 @@ namespace Pathfinding.ECS.RVO {
 
 			public void Execute (Entity entity, in LocalTransform transform, in AgentCylinderShape shape, in AgentMovementPlane movementPlane, in AgentIndex agentIndex, in RVOAgent controller, in MovementControl target) {
 				var scale = math.abs(transform.Scale);
-				var index = agentIndex.Index;
-
-				if (agentData.version[index].Version != agentIndex.Version) throw new System.InvalidOperationException("RVOAgent has an invalid entity index");
+				if (!agentIndex.TryGetIndex(ref agentData, out var index)) throw new System.InvalidOperationException("RVOAgent has an invalid entity index");
 
 				// Actual infinity is not handled well by some algorithms, but very large values are ok.
 				// This should be larger than any reasonable value a user might want to use.
@@ -174,7 +184,6 @@ namespace Pathfinding.ECS.RVO {
 				agentData.manuallyControlled[index] = target.overrideLocalAvoidance;
 				agentData.endOfPath[index] = target.endOfPath;
 				agentData.hierarchicalNodeIndex[index] = target.hierarchicalNodeIndex;
-				// control.endOfPath // TODO
 				agentData.movementPlane[index] = movementPlane.value;
 
 				// Use the position from the movement script if one is attached
@@ -217,7 +226,7 @@ namespace Pathfinding.ECS.RVO {
 		[BurstCompile]
 		public partial struct JobCopyFromRVOSimulatorToEntities : IJobEntity {
 			[ReadOnly]
-			public SimulatorBurst.AgentData agentData;
+			public NativeArray<AgentIndex> agentDataVersions;
 			[ReadOnly]
 			public RVOQuadtreeBurst quadtree;
 			[ReadOnly]
@@ -227,26 +236,17 @@ namespace Pathfinding.ECS.RVO {
 			const float MaximumCirclePackingDensity = 0.9069f;
 
 			public void Execute (in LocalTransform transform, in AgentCylinderShape shape, in AgentIndex agentIndex, in RVOAgent controller, in MovementControl control, ref ResolvedMovement resolved) {
-				var index = agentIndex.Index;
-
-				if (agentData.version[index].Version != agentIndex.Version) return;
+				if (!agentIndex.TryGetIndex(ref agentDataVersions, out var index)) return;
 
 				var scale = math.abs(transform.Scale);
 				var r = shape.radius * scale * 3f;
 				var area = quadtree.QueryArea(transform.Position, r);
 				var density = area / (MaximumCirclePackingDensity * math.PI * r * r);
 
-
 				resolved.targetPoint = agentOutputData.targetPoint[index];
 				resolved.speed = agentOutputData.speed[index];
 				var rnd = 1.0f; // (agentIndex.Index % 1024) / 1024f;
 				resolved.turningRadiusMultiplier = math.max(1f, math.pow(density * 2.0f, 4.0f) * rnd);
-
-				// Pure copy
-				resolved.targetRotation = control.targetRotation;
-				resolved.targetRotationHint = control.targetRotationHint;
-				resolved.targetRotationOffset = control.targetRotationOffset;
-				resolved.rotationSpeed = control.rotationSpeed;
 			}
 		}
 	}

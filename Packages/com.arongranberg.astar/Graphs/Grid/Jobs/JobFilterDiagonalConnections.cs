@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using Pathfinding.Jobs;
 using Pathfinding.Util;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Grid.Jobs {
 	/// <summary>

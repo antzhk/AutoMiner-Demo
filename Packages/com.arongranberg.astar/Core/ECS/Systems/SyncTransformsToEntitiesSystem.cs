@@ -20,9 +20,6 @@ namespace Pathfinding.ECS {
 		public static readonly quaternion ZAxisForwardToYAxisForward = quaternion.Euler(math.PI / 2, 0, 0);
 		public static readonly quaternion YAxisForwardToZAxisForward = quaternion.Euler(-math.PI / 2, 0, 0);
 
-		public void OnCreate (ref SystemState state) {}
-		public void OnDestroy (ref SystemState state) {}
-
 		public void OnUpdate (ref SystemState systemState) {
 			int numComponents = BatchedEvents.GetComponents<FollowerEntity>(BatchedEvents.Event.None, out var transforms, out var components);
 			if (numComponents > 0) {

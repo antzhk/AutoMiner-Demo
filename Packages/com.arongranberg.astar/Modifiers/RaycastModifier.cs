@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace Pathfinding {
 	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 
 	/// <summary>
 	/// Simplifies a path using raycasting.

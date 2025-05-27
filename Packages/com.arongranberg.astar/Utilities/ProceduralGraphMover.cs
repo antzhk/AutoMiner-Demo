@@ -197,7 +197,7 @@ namespace Pathfinding {
 				}
 			},
 				(ctx, force) => {
-				if (GraphUpdateProcessor.ProcessGraphUpdatePromises(promises, ctx, force)) {
+				if (GraphUpdateProcessor.ProcessGraphUpdatePromises(promises, ctx, force ? TimeSlice.Infinite : TimeSlice.MillisFromNow(2)) == -1) {
 					updatingGraph = false;
 					return true;
 				}
@@ -207,7 +207,7 @@ namespace Pathfinding {
 			if (!async) AstarPath.active.FlushWorkItems();
 		}
 
-		static Int2 RecastGraphTileShift (RecastGraph graph, Vector3 targetCenter) {
+		static Vector2Int RecastGraphTileShift (RecastGraph graph, Vector3 targetCenter) {
 			// Find the direction that we want to move the graph in.
 			// Calcuculate this in graph space, to take the graph rotation into account
 			Vector3 dir = graph.transform.InverseTransform(targetCenter) - graph.transform.InverseTransform(graph.forcedBoundsCenter);
@@ -220,13 +220,13 @@ namespace Pathfinding {
 			// Avoid moving unless we want to move at least 0.5+#Hysteresis full tiles
 			// Hysteresis must be at least 0.
 			const float Hysteresis = 0.2f;
-			return new Int2(
+			return new Vector2Int(
 				(int)(Mathf.Max(0, Mathf.Abs(dir.x) / graph.TileWorldSizeX + 0.5f - Hysteresis) * Mathf.Sign(dir.x)),
 				(int)(Mathf.Max(0, Mathf.Abs(dir.z) / graph.TileWorldSizeZ + 0.5f - Hysteresis) * Mathf.Sign(dir.z))
 				);
 		}
 
-		void UpdateRecastGraph (RecastGraph graph, Int2 delta, bool async) {
+		void UpdateRecastGraph (RecastGraph graph, Vector2Int delta, bool async) {
 			updatingGraph = true;
 			List<(IGraphUpdatePromise, IEnumerator<JobHandle>)> promises = new List<(IGraphUpdatePromise, IEnumerator<JobHandle>)>();
 			AstarPath.active.AddWorkItem(new AstarWorkItem(
@@ -235,7 +235,7 @@ namespace Pathfinding {
 				promises.Add((promise, promise.Prepare()));
 			},
 				(ctx, force) => {
-				if (GraphUpdateProcessor.ProcessGraphUpdatePromises(promises, ctx, force)) {
+				if (GraphUpdateProcessor.ProcessGraphUpdatePromises(promises, ctx, force ? TimeSlice.Infinite : TimeSlice.MillisFromNow(2)) == -1) {
 					updatingGraph = false;
 					return true;
 				}

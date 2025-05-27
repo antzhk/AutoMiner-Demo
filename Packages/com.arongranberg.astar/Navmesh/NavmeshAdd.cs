@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace Pathfinding {
 	using Pathfinding.Drawing;
-	using Pathfinding.Graphs.Util;
+	using Pathfinding.Pooling;
+	using Pathfinding.Collections;
 
 	/// <summary>
 	/// Adds new geometry to a recast graph.
@@ -95,11 +96,14 @@ namespace Pathfinding {
 		/// Forces this navmesh add to update the navmesh.
 		///
 		/// This update is not instant, it is done the next time it is checked if it needs updating.
+		///
+		/// If there's no AstarPath component in the scene, this method will do nothing.
+		///
 		/// See: <see cref="NavmeshUpdates.updateInterval"/>
 		/// See: <see cref="NavmeshUpdates.ForceUpdate"/>
 		/// </summary>
 		public override void ForceUpdate () {
-			AstarPath.active.navmeshUpdates.ForceUpdateAround(this);
+			if (AstarPath.active != null) AstarPath.active.navmeshUpdates.ForceUpdateAround(this);
 		}
 
 		protected override void Awake () {
@@ -108,7 +112,7 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Internal method to notify the NavmeshAdd that it has just been used to update the navmesh</summary>
-		internal override void NotifyUpdated (GridLookup<NavmeshClipper>.Root previousState) {
+		public override void NotifyUpdated (GridLookup<NavmeshClipper>.Root previousState) {
 			previousState.previousPosition = tr.position;
 
 			if (useRotationAndScale) {
@@ -122,6 +126,11 @@ namespace Pathfinding {
 			}
 		}
 
+		/// <summary>
+		/// Rebuild the internal mesh representation.
+		///
+		/// Use this if you have changed any settings during runtime.
+		/// </summary>
 		[ContextMenu("Rebuild Mesh")]
 		public void RebuildMesh () {
 			if (type == MeshType.CustomMesh) {
@@ -159,9 +168,9 @@ namespace Pathfinding {
 		/// </summary>
 		public override Rect GetBounds (Pathfinding.Util.GraphTransform inverseTransform, float radiusMargin) {
 			if (this.verts == null) RebuildMesh();
-			var verts = Pathfinding.Util.ArrayPool<Int3>.Claim(this.verts != null? this.verts.Length : 0);
+			var verts = Pathfinding.Pooling.ArrayPool<Int3>.Claim(this.verts != null? this.verts.Length : 0);
 			int[] tris;
-			GetMesh(ref verts, out tris, inverseTransform);
+			GetMesh(ref verts, out tris, out var _, inverseTransform);
 
 			Rect r = new Rect();
 			for (int i = 0; i < tris.Length; i++) {
@@ -176,30 +185,33 @@ namespace Pathfinding {
 				}
 			}
 
-			Pathfinding.Util.ArrayPool<Int3>.Release(ref verts);
+			Pathfinding.Pooling.ArrayPool<Int3>.Release(ref verts);
 			return r;
 		}
 
 		/// <summary>Copy the mesh to the vertex and triangle buffers after the vertices have been transformed using the inverse of the inverseTransform parameter.</summary>
 		/// <param name="vbuffer">Assumed to be either null or an array which has a length of zero or a power of two. If this mesh has more
-		///  vertices than can fit in the buffer then the buffer will be pooled using Pathfinding.Util.ArrayPool.Release and
+		///  vertices than can fit in the buffer then the buffer will be pooled using Pathfinding.Pooling.ArrayPool.Release and
 		///  a new sufficiently large buffer will be taken from the pool.</param>
 		/// <param name="tbuffer">This will be set to the internal triangle buffer. You must not modify this array.</param>
+		/// <param name="vertexCount">This will be set to the number of vertices in the vertex buffer.</param>
 		/// <param name="inverseTransform">All vertices will be transformed using the #Pathfinding.GraphTransform.InverseTransform method.
 		///  This is typically used to transform from world space to graph space.</param>
-		public void GetMesh (ref Int3[] vbuffer, out int[] tbuffer, Pathfinding.Util.GraphTransform inverseTransform = null) {
+		public void GetMesh (ref Int3[] vbuffer, out int[] tbuffer, out int vertexCount, Pathfinding.Util.GraphTransform inverseTransform = null) {
 			if (verts == null) RebuildMesh();
 
 			if (verts == null) {
-				tbuffer = Util.ArrayPool<int>.Claim(0);
+				tbuffer = ArrayPool<int>.Claim(0);
+				vertexCount = 0;
 				return;
 			}
 
 			if (vbuffer == null || vbuffer.Length < verts.Length) {
-				if (vbuffer != null) Util.ArrayPool<Int3>.Release(ref vbuffer);
-				vbuffer = Util.ArrayPool<Int3>.Claim(verts.Length);
+				if (vbuffer != null) ArrayPool<Int3>.Release(ref vbuffer);
+				vbuffer = ArrayPool<Int3>.Claim(verts.Length);
 			}
 			tbuffer = tris;
+			vertexCount = verts.Length;
 
 			if (useRotationAndScale) {
 				Matrix4x4 m = Matrix4x4.TRS(tr.position + center, tr.rotation, tr.localScale * meshScale);
@@ -227,8 +239,7 @@ namespace Pathfinding {
 		public override void DrawGizmos () {
 			if (tr == null) tr = transform;
 
-			int[] tbuffer;
-			GetMesh(ref gizmoBuffer, out tbuffer);
+			GetMesh(ref gizmoBuffer, out var tbuffer, out var _);
 
 			for (int i = 0; i < tbuffer.Length; i += 3) {
 				var v1 = (Vector3)gizmoBuffer[tbuffer[i+0]];

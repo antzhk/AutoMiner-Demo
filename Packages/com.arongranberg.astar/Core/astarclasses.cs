@@ -8,9 +8,11 @@ namespace Pathfinding.RVO {}
 namespace Pathfinding {
 	using Pathfinding.Jobs;
 	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 	using Unity.Burst;
 	using Unity.Collections;
 	using Unity.Jobs;
+	using Unity.Mathematics;
 
 	[System.Serializable]
 	/// <summary>Stores editor colors</summary>
@@ -73,7 +75,7 @@ namespace Pathfinding {
 		/// and it has a positive performance impact as well (gizmo rendering is hot code).
 		/// It is a bit ugly though, but oh well.
 		/// </summary>
-		public void PushToStatic (AstarPath astar) {
+		public void PushToStatic () {
 			_AreaColors  = _AreaColors ?? new Color[0];
 
 			SolidColor = _SolidColor;
@@ -444,6 +446,14 @@ namespace Pathfinding {
 			return true;
 		}
 
+		public void UseSettings (PathRequestSettings settings) {
+			graphMask = settings.graphMask;
+			constrainTags = true;
+			tags = settings.traversableTags;
+			constrainWalkability = true;
+			walkable = true;
+		}
+
 		/// <summary>
 		/// The default NNConstraint.
 		/// Equivalent to new NNConstraint ().
@@ -556,7 +566,7 @@ namespace Pathfinding {
 		/// Closest point on the navmesh.
 		/// Deprecated: This field has been renamed to <see cref="position"/>
 		/// </summary>
-		[System.Obsolete("This field has been renamed to 'position'")]
+		[System.Obsolete("This field has been renamed to 'position'", true)]
 		public Vector3 clampedPosition {
 			get {
 				return position;
@@ -873,9 +883,11 @@ namespace Pathfinding {
 			public NativeArray<uint> nodePenalties;
 			public NativeArray<bool> nodeWalkable;
 			public NativeArray<int> nodeTags;
+			public NativeArray<float4> nodeNormals;
 			/// <summary>
 			/// Node indices to update.
 			/// Remaining nodes should be left alone.
+			/// Additionally, if math.any(nodeNormals[i]) is false, then the node should not be updated, since it is not a valid node.
 			/// </summary>
 			public NativeArray<int> nodeIndices;
 		};
@@ -896,6 +908,8 @@ namespace Pathfinding {
 			public void Execute () {
 				for (int i = 0; i < data.nodeIndices.Length; i++) {
 					var node = data.nodeIndices[i];
+					if (!math.any(data.nodeNormals[node])) continue;
+
 					if (bounds.Contains(data.nodePositions[node]) && shape.Contains(data.nodePositions[node])) {
 						data.nodePenalties[node] += (uint)penaltyDelta;
 						if (modifyWalkability) data.nodeWalkable[node] = walkabilityValue;
@@ -1006,15 +1020,15 @@ namespace Pathfinding {
 			return xmin <= other.xmin && xmax >= other.xmax && ymin <= other.ymin && ymax >= other.ymax;
 		}
 
-		public Int2 Min {
+		public Vector2Int Min {
 			get {
-				return new Int2(xmin, ymin);
+				return new Vector2Int(xmin, ymin);
 			}
 		}
 
-		public Int2 Max {
+		public Vector2Int Max {
 			get {
-				return new Int2(xmax, ymax);
+				return new Vector2Int(xmax, ymax);
 			}
 		}
 
@@ -1155,7 +1169,7 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Returns a new IntRect which has been moved by an offset</summary>
-		public IntRect Offset (Int2 offset) {
+		public IntRect Offset (Vector2Int offset) {
 			return new IntRect(xmin + offset.x, ymin + offset.y, xmax + offset.x, ymax + offset.y);
 		}
 
@@ -1171,6 +1185,17 @@ namespace Pathfinding {
 
 		public override string ToString () {
 			return "[x: "+xmin+"..."+xmax+", y: " + ymin +"..."+ymax+"]";
+		}
+
+		/// <summary>Returns a list of all integer coordinates inside the rectangle, in row-major order</summary>
+		public List<Vector2Int> GetInnerCoordinates () {
+			var list = ListPool<Vector2Int>.Claim(Width*Height);
+			for (int y = ymin; y <= ymax; y++) {
+				for (int x = xmin; x <= xmax; x++) {
+					list.Add(new Vector2Int(x, y));
+				}
+			}
+			return list;
 		}
 	}
 

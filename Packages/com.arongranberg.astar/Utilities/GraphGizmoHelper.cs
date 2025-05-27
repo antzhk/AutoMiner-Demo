@@ -2,6 +2,8 @@ using UnityEngine;
 
 namespace Pathfinding.Util {
 	using Pathfinding.Drawing;
+	using Pathfinding.Collections;
+	using Pathfinding.Pooling;
 
 	/// <summary>Combines hashes into a single hash value</summary>
 	public struct NodeHasher {
@@ -20,6 +22,7 @@ namespace Pathfinding.Util {
 			hasher.Add(active.debugMode);
 			hasher.Add(active.debugFloor);
 			hasher.Add(active.debugRoof);
+			hasher.Add(active.showSearchTree);
 			hasher.Add(AstarColor.ColorHash());
 		}
 
@@ -50,7 +53,7 @@ namespace Pathfinding.Util {
 		PathHandler debugData;
 		ushort debugPathID;
 		GraphDebugMode debugMode;
-		bool showSearchTree;
+		public bool showSearchTree;
 		float debugFloor;
 		float debugRoof;
 		public CommandBuilder builder;
@@ -108,7 +111,8 @@ namespace Pathfinding.Util {
 #if UNITY_EDITOR
 				if (debugPathNodes.Length > 0) {
 					var nodeIndex = node.NodeIndex;
-					for (uint i = 0; i < (uint)node.PathNodeVariants; i++) {
+					var variants = (uint)node.PathNodeVariants;
+					for (uint i = 0; i < variants; i++) {
 						var pnode = debugPathNodes[nodeIndex + i];
 						if (pnode.pathID == debugPathID) {
 							if (pnode.parentIndex != 0 && debugPathNodes[pnode.parentIndex].pathID == debugPathID) {
@@ -176,16 +180,30 @@ namespace Pathfinding.Util {
 						break;
 					}
 
-					var pathNode = debugPathNodes[node.NodeIndex];
-					float value;
-					if (debugMode == GraphDebugMode.G) {
-						value = pathNode.g;
-					} else if (debugMode == GraphDebugMode.H) {
-						value = pathNode.h;
-					} else {
-						// mode == F
-						value = pathNode.g + pathNode.h;
+					var variants = (uint)node.PathNodeVariants;
+					float value1 = float.PositiveInfinity;
+					float value2 = float.PositiveInfinity;
+					for (uint i = 0; i < variants; i++) {
+						var pathNode = debugPathNodes[node.NodeIndex + i];
+						float v;
+						if (debugMode == GraphDebugMode.G) {
+							v = pathNode.g;
+						} else if (debugMode == GraphDebugMode.H) {
+							v = pathNode.h;
+						} else {
+							// mode == F
+							v = pathNode.g + pathNode.h;
+						}
+						if (pathNode.pathID == debugPathID) {
+							value1 = System.Math.Min(value1, v);
+						} else {
+							value2 = System.Math.Min(value2, v);
+						}
 					}
+
+					// Pick the minimum of only the variants searched by the current path if any, otherwise take minimum of all variants.
+					// For graphs without multiple variants per node (all graphs except recast graphs), this will always just pick the value for the single node variant.
+					float value = float.IsPositiveInfinity(value1) ? value2 : value1;
 
 					color = Color.Lerp(AstarColor.ConnectionLowLerp, AstarColor.ConnectionHighLerp, (value-debugFloor) / (debugRoof-debugFloor));
 #else

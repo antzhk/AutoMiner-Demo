@@ -5,11 +5,12 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Burst;
+using Unity.Profiling;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Pathfinding.Drawing;
 
-namespace Pathfinding.Graphs.Navmesh {
+namespace Pathfinding.Collections {
 	using Pathfinding.Util;
 
 	/// <summary>
@@ -192,8 +193,8 @@ namespace Pathfinding.Graphs.Navmesh {
 
 		/// <summary>Calculates the bounding box in XZ space of all nodes between from (inclusive) and to (exclusive)</summary>
 		static IntRect NodeBounds (NativeArray<int> permutation, NativeArray<IntRect> nodeBounds, int from, int to) {
-			var mn = (int2)nodeBounds[permutation[from]].Min;
-			var mx = (int2)nodeBounds[permutation[from]].Max;
+			var mn = nodeBounds[permutation[from]].Min.ToInt2();
+			var mx = nodeBounds[permutation[from]].Max.ToInt2();
 
 			for (int j = from + 1; j < to; j++) {
 				var otherRect = nodeBounds[permutation[j]];
@@ -234,7 +235,7 @@ namespace Pathfinding.Graphs.Navmesh {
 				return SquaredRectPointDistanceOnPlane(in this, ref rect, ref p);
 			}
 
-			[BurstCompile(FloatMode = FloatMode.Fast)]
+			[BurstCompile(FloatMode = FloatMode.Fast)][IgnoredByDeepProfiler]
 			private static float SquaredRectPointDistanceOnPlane (in ProjectionParams projection, ref IntRect rect, ref float3 p) {
 				if (projection.alignedWithXZPlane) {
 					var p1 = new float2(rect.xmin, rect.ymin) * Int3.PrecisionFactor;

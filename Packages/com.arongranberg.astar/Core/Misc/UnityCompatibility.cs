@@ -36,3 +36,10 @@ namespace Pathfinding.Util {
 		}
 	}
 }
+
+#if !UNITY_2022_3_OR_NEWER
+namespace Pathfinding {
+	public class IgnoredByDeepProfilerAttribute : System.Attribute {
+	}
+}
+#endif

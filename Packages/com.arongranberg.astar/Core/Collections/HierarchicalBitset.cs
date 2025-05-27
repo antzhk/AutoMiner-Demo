@@ -7,7 +7,7 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine.Assertions;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Collections {
 	/// <summary>
 	/// Thread-safe hierarchical bitset.
 	///

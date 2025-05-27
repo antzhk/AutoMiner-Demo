@@ -81,19 +81,10 @@ namespace Pathfinding {
 		/// See: <see cref="GridGraph.neighbourXOffsets"/>
 		/// See: <see cref="GridGraph.neighbourZOffsets"/>
 		/// See: <see cref="GridGraph.neighbourOffsets"/>
-		/// See: <see cref="GridGraph.GetNeighbourIndices"/>
+		/// See: <see cref="GridGraph.GetNeighbourDirections"/>
 		/// </summary>
 		public override bool HasConnectionInDirection (int dir) {
 			return (gridFlags >> dir & GridFlagsConnectionBit0) != 0;
-		}
-
-		/// <summary>
-		/// True if the node has a connection in the specified direction.
-		/// Deprecated: Use <see cref="HasConnectionInDirection"/>
-		/// </summary>
-		[System.Obsolete("Use HasConnectionInDirection")]
-		public bool GetConnectionInternal (int dir) {
-			return HasConnectionInDirection(dir);
 		}
 
 		/// <summary>

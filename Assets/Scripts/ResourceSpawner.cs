@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -18,6 +19,15 @@ public class ResourceSpawner : MonoBehaviour
 
     private float timer;
 
+    private static ResourceSpawner instance;
+
+
+    public void Start()
+    {
+        if (instance == null)
+            instance = this;
+    }
+
     public void Update()
     {
         timer += Time.deltaTime;
@@ -35,5 +45,15 @@ public class ResourceSpawner : MonoBehaviour
         }
         
         AstarPath.active.Scan();
+    }
+
+    public void ChangeDelay(float value)
+    {
+        this.spawn_delay = value;
+    }
+
+    public static ResourceSpawner Get()
+    {
+        return instance;
     }
 }

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
-using Pathfinding.Drawing;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Profiling;

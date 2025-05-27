@@ -26,6 +26,7 @@ namespace Pathfinding.ECS {
 		/// See: <see cref="Pathfinding.AutoRepathPolicy.Mode"/> for more details.
 		/// </summary>
 		public Pathfinding.AutoRepathPolicy.Mode mode;
+		byte pathFailures;
 
 		/// <summary>Number of seconds between each automatic path recalculation for Mode.EveryNSeconds, and the maximum interval for Mode.Dynamic</summary>
 		public float period;
@@ -45,6 +46,7 @@ namespace Pathfinding.ECS {
 			period = policy.mode == Pathfinding.AutoRepathPolicy.Mode.Dynamic ? policy.maximumPeriod : policy.period;
 			lastDestination = float.PositiveInfinity;
 			lastRepathTime = float.NegativeInfinity;
+			pathFailures = 0;
 		}
 
 		/// <summary>
@@ -56,12 +58,26 @@ namespace Pathfinding.ECS {
 		/// <param name="radius">The radius of the agent. You may pass 0.0 if the agent doesn't have a radius.</param>
 		/// <param name="destination">The goal of the agent right now</param>
 		/// <param name="time">The current time in seconds</param>
-		public bool ShouldRecalculatePath (float3 position, float radius, float3 destination, float time) {
-			if (mode == Pathfinding.AutoRepathPolicy.Mode.Never || float.IsPositiveInfinity(destination.x)) return false;
+		/// <param name="isPathStale">You may pass true if the agent knows that the current path is outdated for some reason (for example if some nodes in it have been destroyed).</param>
+		public bool ShouldRecalculatePath (float3 position, float radius, float3 destination, float time, bool isPathStale) {
+			if (mode == Pathfinding.AutoRepathPolicy.Mode.Never || !float.IsFinite(destination.x)) return false;
 
 			float timeSinceLast = time - lastRepathTime;
+
+			var tmpPeriod = period;
+			if (isPathStale) {
+				// If the path is stale, we recalculate the path more often.
+				// But if the path just continues to fail, then we back off exponentially up to the maximum period.
+				// 0 failures  => 0
+				// 1 failure   => period/4
+				// 2 failures  => period/2
+				// 3+ failures => period
+				if (pathFailures == 0) return true;
+				tmpPeriod = period * math.min(1, 0.125f * (1 << pathFailures));
+			}
+
 			if (mode == Pathfinding.AutoRepathPolicy.Mode.EveryNSeconds) {
-				return timeSinceLast >= period;
+				return timeSinceLast >= tmpPeriod;
 			} else {
 				// cost = change in destination / max(distance to destination, radius)
 				float squaredCost = math.lengthsq(destination - lastDestination) / math.max(math.lengthsq(position - lastDestination), radius*radius);
@@ -74,7 +90,15 @@ namespace Pathfinding.ECS {
 					fraction = 0;
 				}
 
-				return timeSinceLast >= period*(1 - math.sqrt(fraction));
+				return timeSinceLast >= tmpPeriod*(1 - math.sqrt(fraction));
+			}
+		}
+
+		public void OnPathCalculated (bool hadError) {
+			if (hadError) {
+				pathFailures = (byte)math.min(255, pathFailures++);
+			} else {
+				pathFailures = 0;
 			}
 		}
 
@@ -84,7 +108,7 @@ namespace Pathfinding.ECS {
 		}
 
 		/// <summary>Must be called when a path request has been scheduled</summary>
-		public void DidRecalculatePath (float3 destination, float time) {
+		public void OnScheduledPathRecalculation (float3 destination, float time) {
 			lastRepathTime = time;
 			lastDestination = destination;
 			// Randomize the repath time slightly so that all agents don't request a path at the same time

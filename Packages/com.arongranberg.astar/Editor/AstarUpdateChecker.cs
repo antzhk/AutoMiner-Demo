@@ -153,29 +153,34 @@ namespace Pathfinding {
 		/// Returns: True if an update check is progressing (WWW request)
 		/// </summary>
 		static bool CheckForUpdates () {
-			if (updateCheckDownload != null && updateCheckDownload.isDone) {
-				if (!string.IsNullOrEmpty(updateCheckDownload.error)) {
-					Debug.LogWarning("There was an error checking for updates to the A* Pathfinding Project\n" +
-						"The error might disappear if you switch build target from Webplayer to Standalone because of the webplayer security emulation\nError: " +
-						updateCheckDownload.error);
+			if (updateCheckDownload != null) {
+				if (updateCheckDownload.isDone) {
+					if (!string.IsNullOrEmpty(updateCheckDownload.error)) {
+						Debug.LogWarning("There was an error checking for updates to the A* Pathfinding Project\n" +
+							"The error might disappear if you switch build target from Webplayer to Standalone because of the webplayer security emulation\nError: " +
+							updateCheckDownload.error);
+						updateCheckDownload = null;
+						return false;
+					}
+					lastUpdateCheck = System.DateTime.UtcNow;
+					UpdateCheckCompleted(updateCheckDownload.downloadHandler.text);
+					updateCheckDownload.Dispose();
 					updateCheckDownload = null;
 					return false;
+				} else {
+					return true;
 				}
-				UpdateCheckCompleted(updateCheckDownload.downloadHandler.text);
-				updateCheckDownload.Dispose();
-				updateCheckDownload = null;
+			} else {
+				// Check if it is time to check for updates
+				// Check for updates a bit earlier if we are in play mode or have the AstarPath object in the scene
+				// as then the collected statistics will be a bit more accurate
+				var offsetMinutes = (Application.isPlaying && Time.time > 60) || AstarPath.active != null ? -20 : 20;
+				var minutesUntilUpdate = lastUpdateCheck.AddDays(updateCheckRate).AddMinutes(offsetMinutes).Subtract(System.DateTime.UtcNow).TotalMinutes;
+				if (minutesUntilUpdate < 0) {
+					DownloadVersionInfo();
+				}
+				return updateCheckDownload != null || minutesUntilUpdate < 10;
 			}
-
-			// Check if it is time to check for updates
-			// Check for updates a bit earlier if we are in play mode or have the AstarPath object in the scene
-			// as then the collected statistics will be a bit more accurate
-			var offsetMinutes = (Application.isPlaying && Time.time > 60) || AstarPath.active != null ? -20 : 20;
-			var minutesUntilUpdate = lastUpdateCheck.AddDays(updateCheckRate).AddMinutes(offsetMinutes).Subtract(System.DateTime.UtcNow).TotalMinutes;
-			if (minutesUntilUpdate < 0) {
-				DownloadVersionInfo();
-			}
-
-			return updateCheckDownload != null || minutesUntilUpdate < 10;
 		}
 
 		static void DownloadVersionInfo () {
@@ -205,7 +210,6 @@ namespace Pathfinding {
 
 			updateCheckDownload = UnityWebRequest.Get(query);
 			updateCheckDownload.SendWebRequest();
-			lastUpdateCheck = System.DateTime.UtcNow;
 		}
 
 		/// <summary>Handles the data from the update page</summary>

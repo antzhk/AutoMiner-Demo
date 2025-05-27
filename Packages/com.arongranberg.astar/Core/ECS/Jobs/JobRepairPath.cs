@@ -10,6 +10,7 @@ using GCHandle = System.Runtime.InteropServices.GCHandle;
 namespace Pathfinding.ECS {
 	using Pathfinding;
 	using Pathfinding.Util;
+	using Pathfinding.Collections;
 	using Unity.Burst;
 	using Unity.Jobs;
 
@@ -36,6 +37,7 @@ namespace Pathfinding.ECS {
 			public ComponentTypeHandle<ManagedState> ManagedStateTypeHandleRW;
 			[ReadOnly]
 			public ComponentTypeHandle<MovementSettings> MovementSettingsTypeHandleRO;
+			public ComponentTypeHandle<AutoRepathPolicy> AutoRepathPolicyRW;
 			[ReadOnly]
 			public ComponentTypeHandle<DestinationPoint> DestinationPointTypeHandleRO;
 			[ReadOnly]
@@ -49,7 +51,7 @@ namespace Pathfinding.ECS {
 					   .WithAllRW<MovementState>()
 					   .WithAllRW<ManagedState>()
 					   .WithAllRW<LocalTransform>()
-					   .WithAll<MovementSettings, DestinationPoint, AgentMovementPlane, AgentCylinderShape>()
+					   .WithAll<MovementSettings, AutoRepathPolicy, DestinationPoint, AgentMovementPlane, AgentCylinderShape>()
 				       //    .WithAny<ReadyToTraverseOffMeshLink>() // TODO: Use WithPresent in newer versions
 					   .WithAbsent<AgentOffMeshLinkTraversal>();
 			}
@@ -59,6 +61,7 @@ namespace Pathfinding.ECS {
 				LocalTransformTypeHandleRO = systemState.GetComponentTypeHandle<LocalTransform>(true);
 				MovementStateTypeHandleRW = systemState.GetComponentTypeHandle<MovementState>(false);
 				AgentCylinderShapeTypeHandleRO = systemState.GetComponentTypeHandle<AgentCylinderShape>(true);
+				AutoRepathPolicyRW = systemState.GetComponentTypeHandle<AutoRepathPolicy>(false);
 				DestinationPointTypeHandleRO = systemState.GetComponentTypeHandle<DestinationPoint>(true);
 				AgentMovementPlaneTypeHandleRO = systemState.GetComponentTypeHandle<AgentMovementPlane>(true);
 				MovementSettingsTypeHandleRO = systemState.GetComponentTypeHandle<MovementSettings>(true);
@@ -76,6 +79,7 @@ namespace Pathfinding.ECS {
 				LocalTransformTypeHandleRO.Update(ref systemState);
 				MovementStateTypeHandleRW.Update(ref systemState);
 				AgentCylinderShapeTypeHandleRO.Update(ref systemState);
+				AutoRepathPolicyRW.Update(ref systemState);
 				DestinationPointTypeHandleRO.Update(ref systemState);
 				ManagedStateTypeHandleRW.Update(ref systemState);
 				MovementSettingsTypeHandleRO.Update(ref systemState);
@@ -111,6 +115,7 @@ namespace Pathfinding.ECS {
 				var localTransforms = (LocalTransform*)chunk.GetNativeArray(ref scheduler.LocalTransformTypeHandleRO).GetUnsafeReadOnlyPtr();
 				var movementStates = (MovementState*)chunk.GetNativeArray(ref scheduler.MovementStateTypeHandleRW).GetUnsafePtr();
 				var agentCylinderShapes = (AgentCylinderShape*)chunk.GetNativeArray(ref scheduler.AgentCylinderShapeTypeHandleRO).GetUnsafeReadOnlyPtr();
+				var autoRepathPolicy = (AutoRepathPolicy*)chunk.GetNativeArray(ref scheduler.AutoRepathPolicyRW).GetUnsafePtr();
 				var destinationPoints = (DestinationPoint*)chunk.GetNativeArray(ref scheduler.DestinationPointTypeHandleRO).GetUnsafeReadOnlyPtr();
 				var movementSettings = (MovementSettings*)chunk.GetNativeArray(ref scheduler.MovementSettingsTypeHandleRO).GetUnsafeReadOnlyPtr();
 				var agentMovementPlanes = (AgentMovementPlane*)chunk.GetNativeArray(ref scheduler.AgentMovementPlaneTypeHandleRO).GetUnsafeReadOnlyPtr();
@@ -124,6 +129,7 @@ namespace Pathfinding.ECS {
 						ref movementStates[i],
 						ref agentCylinderShapes[i],
 						ref agentMovementPlanes[i],
+						ref autoRepathPolicy[i],
 						ref destinationPoints[i],
 						mask.GetEnabledRefRW<ReadyToTraverseOffMeshLink>(i),
 						managedStates[i],
@@ -141,13 +147,14 @@ namespace Pathfinding.ECS {
 		private static readonly ProfilerMarker MarkerGetNextCorners = new ProfilerMarker("GetNextCorners");
 		private static readonly ProfilerMarker MarkerUpdateReachedEndInfo = new ProfilerMarker("UpdateReachedEndInfo");
 
-		public static void Execute (ref LocalTransform transform, ref MovementState state, ref AgentCylinderShape shape, ref AgentMovementPlane movementPlane, ref DestinationPoint destination, EnabledRefRW<ReadyToTraverseOffMeshLink> readyToTraverseOffMeshLink, ManagedState managedState, in MovementSettings settings, NativeList<float3> nextCornersScratch, ref NativeArray<int> indicesScratch, Allocator allocator, bool onlyApplyPendingPaths) {
+		public static void Execute (ref LocalTransform transform, ref MovementState state, ref AgentCylinderShape shape, ref AgentMovementPlane movementPlane, ref AutoRepathPolicy autoRepathPolicy, ref DestinationPoint destination, EnabledRefRW<ReadyToTraverseOffMeshLink> readyToTraverseOffMeshLink, ManagedState managedState, in MovementSettings settings, NativeList<float3> nextCornersScratch, ref NativeArray<int> indicesScratch, Allocator allocator, bool onlyApplyPendingPaths) {
 			// Only enabled by the PollPendingPathsSystem
 			if (onlyApplyPendingPaths) {
 				if (managedState.pendingPath != null && managedState.pendingPath.IsDone()) {
 					// The path has been calculated, apply it to the agent
 					// Immediately after this we must also repair the path to ensure that it is valid and that
 					// all properties like #MovementState.reachedEndOfPath are correct.
+					autoRepathPolicy.OnPathCalculated(managedState.pendingPath.error);
 					ManagedState.SetPath(managedState.pendingPath, managedState, in movementPlane, ref destination);
 				} else {
 					// The agent has no path that has just been calculated, skip it

@@ -40,6 +40,7 @@ namespace Pathfinding {
 
 			// Hard coded limit on 1.0 ms
 			long targetTick = timeSlice ? System.DateTime.UtcNow.Ticks + 1 * 10000 : 0;
+			// TODO: Use timeslice
 
 			int counter = 0;
 			int totalReturned = 0;

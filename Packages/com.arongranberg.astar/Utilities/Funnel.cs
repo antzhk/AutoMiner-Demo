@@ -5,11 +5,10 @@ using System.Linq;
 using UnityEngine.Assertions;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
+	using Pathfinding.Collections;
 	using Unity.Burst;
 	using Unity.Collections;
-	using Unity.Collections.LowLevel.Unsafe;
-	using Unity.Jobs;
 	using Unity.Mathematics;
 	using UnityEngine.Profiling;
 
@@ -290,6 +289,7 @@ namespace Pathfinding {
 
 				if (start == end) {
 					result.Add(nodes[end]);
+					RemoveBacktracking(result, ostart, result.Count-2);
 					return;
 				}
 
@@ -317,6 +317,7 @@ namespace Pathfinding {
 
 				if (!anySucceded) {
 					result.Add(nodes[start]);
+					RemoveBacktracking(result, ostart, result.Count-2);
 
 					// It is guaranteed that mn = start+1
 					start = mn;
@@ -347,11 +348,28 @@ namespace Pathfinding {
 						result.Add(nodes[start]);
 						start++;
 					} else {
-						//Remove nodes[end]
+						// In some rare cases, doing the raycast simplification may cause it to backtrack so that the path goes:
+						// A -> B -> C -> B -> D
+						// While this is technically allowed, it will cause a weird and suboptimal path. So we should try to avoid it.
+						RemoveBacktracking(result, ostart, resCount);
+
+						// Remove nodes[end], otherwise we will get a duplicate node when the next raycast happens
 						result.RemoveAt(result.Count-1);
 						start = mn;
 					}
 				}
+			}
+		}
+
+		/// <summary>
+		/// Removes backtracking in the path.
+		/// This can happen when the path goes A -> B -> C -> B -> D.
+		/// This method will replace B -> C -> B with just B, when passed aroundIndex=C.
+		/// </summary>
+		static void RemoveBacktracking (List<GraphNode> nodes, int listStartIndex, int aroundIndex) {
+			while (aroundIndex - 1 > listStartIndex && aroundIndex + 1 < nodes.Count && nodes[aroundIndex-1] == nodes[aroundIndex+1]) {
+				nodes.RemoveRange(aroundIndex, 2);
+				aroundIndex--;
 			}
 		}
 
@@ -711,10 +729,12 @@ namespace Pathfinding {
 			// TODO: On grid graphs this is kind of a weird way to do it.
 			// We project all points onto a plane and then unwrap them.
 			// It would be faster (and possibly more numerically accurate) to transform the points to graph space and then just use the xz coordinates.
-			// We also slow down the navmesh case by adding these 3 dot products.
-			leftPortal -= math.dot(leftPortal, projectionAxis);
-			rightPortal -= math.dot(rightPortal, projectionAxis);
-			point -= math.dot(point, projectionAxis);
+			// This branch is extremely well predicted, since it will always be true for grid graphs, and always false for other graphs.
+			if (!math.all(projectionAxis == 0)) {
+				leftPortal -= projectionAxis * math.dot(leftPortal, projectionAxis);
+				rightPortal -= projectionAxis * math.dot(rightPortal, projectionAxis);
+				point -= projectionAxis * math.dot(point, projectionAxis);
+			}
 
 			var portal = rightPortal - leftPortal;
 			var portalLengthInvSq = 1.0f / math.lengthsq(portal);

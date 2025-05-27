@@ -361,18 +361,31 @@ namespace Pathfinding.RVO {
 			public float3 position;
 			public float speed, timeHorizon, agentRadius;
 			public int outputStartIndex, maxCount;
+			public RVOLayer layerMask;
+			public NativeArray<RVOLayer> layers;
 			public NativeArray<int> result;
 			public NativeArray<float> resultDistances;
 		}
 
-		public void QueryKNearest (QuadtreeQuery query) {
-			if (!agents.IsCreated) return;
-			float maxRadius = float.PositiveInfinity;
+		/// <summary>
+		/// A very large distance. Used as a sentinel value in the QueryKNearest method.
+		/// We don't use actual infinity, because the code may be compiled using FastMath, which makes the compiler assume that infinities do not exist.
+		/// This should be much larger than any distance used in practice.
+		/// </summary>
+		const float DistanceInfinity = 1e30f;
+
+		public int QueryKNearest (QuadtreeQuery query) {
+			if (!agents.IsCreated) return 0;
+			float maxRadius = DistanceInfinity;
 
 			for (int i = 0; i < query.maxCount; i++) query.result[query.outputStartIndex + i] = -1;
-			for (int i = 0; i < query.maxCount; i++) query.resultDistances[i] = float.PositiveInfinity;
+			for (int i = 0; i < query.maxCount; i++) query.resultDistances[i] = DistanceInfinity;
 
 			QueryRec(ref query, 0, boundingBoxBuffer[0], boundingBoxBuffer[1], ref maxRadius);
+
+			int numFound = 0;
+			while (numFound < query.maxCount && query.resultDistances[numFound] < DistanceInfinity) numFound++;
+			return numFound;
 		}
 
 		void QueryRec (ref QuadtreeQuery query, int treeNodeIndex, float3 nodeMin, float3 nodeMax, ref float maxRadius) {
@@ -395,7 +408,7 @@ namespace Pathfinding.RVO {
 				for (int j = startIndex; j < endIndex; j++) {
 					var agent = agents[j];
 					float sqrDistance = math.lengthsq(p - agentPositions[agent]);
-					if (sqrDistance < radius*radius) {
+					if (sqrDistance < radius*radius && (query.layers[agent] & query.layerMask) != 0) {
 						// Close enough
 
 						// Insert the agent into the results list using insertion sort

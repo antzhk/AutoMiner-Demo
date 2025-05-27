@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine.Profiling;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 	using Unity.Collections.LowLevel.Unsafe;
 
 	/// <summary>

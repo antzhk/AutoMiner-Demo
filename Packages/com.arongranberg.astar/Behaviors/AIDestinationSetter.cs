@@ -11,7 +11,7 @@ namespace Pathfinding {
 	/// This component will then make the AI move towards the <see cref="target"/> set on this component.
 	///
 	/// Essentially the only thing this component does is to set the <see cref="Pathfinding.IAstarAI.destination"/> property to the position of the target every frame.
-	/// There is some additional complexity to make sure that the destination is updated immediately before the AI searches for a path as well, in case the
+	/// But there is some additional complexity to make sure that the destination is updated immediately before the AI searches for a path as well, in case the
 	/// target moved since the last Update. There is also some complexity to reduce the performance impact, by using the <see cref="BatchedEvents"/> system to
 	/// process all AIDestinationSetter components in a single batch.
 	///
@@ -19,15 +19,13 @@ namespace Pathfinding {
 	/// The destination syncing is then handled by the <see cref="SyncDestinationTransformSystem"/> for better performance.
 	///
 	/// See: <see cref="Pathfinding.IAstarAI.destination"/>
-	///
-	/// [Open online documentation to see images]
 	/// </summary>
 	[UniqueComponent(tag = "ai.destination")]
 	[AddComponentMenu("Pathfinding/AI/Behaviors/AIDestinationSetter")]
 	[HelpURL("https://arongranberg.com/astar/documentation/stable/aidestinationsetter.html")]
 	public class AIDestinationSetter : VersionedMonoBehaviour
 #if MODULE_ENTITIES
-		, IComponentData, IRuntimeBaker
+		, IRuntimeBaker
 #endif
 	{
 		/// <summary>The object that the AI should move to</summary>
@@ -91,7 +89,7 @@ namespace Pathfinding {
 			// Do nothing except add the component. Actual syncing is handled by the SyncDestinationTransformSystem.
 			this.entity = entity;
 			this.world = world;
-			world.EntityManager.AddComponentData<AIDestinationSetter>(entity, this);
+			world.EntityManager.AddComponentObject(entity, this);
 		}
 #endif
 

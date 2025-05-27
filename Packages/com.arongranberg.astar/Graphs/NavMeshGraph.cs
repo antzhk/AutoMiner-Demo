@@ -11,10 +11,6 @@ namespace Pathfinding {
 	using Pathfinding.Graphs.Navmesh;
 	using Unity.Mathematics;
 
-	public interface INavmesh {
-		void GetNodes(System.Action<GraphNode> del);
-	}
-
 	/// <summary>
 	/// Generates graphs based on navmeshes.
 	/// [Open online documentation to see images]
@@ -29,9 +25,20 @@ namespace Pathfinding {
 	/// For a tutorial on how to configure a navmesh graph, take a look at getstarted2 (view in online documentation for working links).
 	///
 	/// [Open online documentation to see images]
+	///
+	/// \section navmeshgraph-inspector Inspector
 	/// [Open online documentation to see images]
 	///
-	/// See: Pathfinding.RecastGraph
+	/// \inspectorField{Source Mesh, sourceMesh}
+	/// \inspectorField{Offset, offset}
+	/// \inspectorField{Rotation, rotation}
+	/// \inspectorField{Scale, scale}
+	/// \inspectorField{Recalculate Normals, recalculateNormals}
+	/// \inspectorField{Affected By Navmesh Cuts, enableNavmeshCutting}
+	/// \inspectorField{Agent Radius, navmeshCuttingCharacterRadius}
+	/// \inspectorField{Initial Penalty, initialPenalty}
+	///
+	/// See: <see cref="RecastGraph"/>
 	/// </summary>
 	[JsonOptIn]
 	[Pathfinding.Util.Preserve]
@@ -262,6 +269,7 @@ namespace Pathfinding {
 			NavmeshTile[] tiles;
 			Vector3 forcedBoundsSize;
 			IntRect tileRect;
+			NavmeshUpdates.NavmeshUpdateSettings cutSettings;
 
 			public IEnumerator<JobHandle> Prepare () {
 				var sourceMesh = graph.sourceMesh;
@@ -288,30 +296,48 @@ namespace Pathfinding {
 				// Convert the vertices to graph space
 				// so that the minimum of the bounding box of the mesh is at the origin
 				// (the vertices will later be transformed to world space)
-				var meshToGraphSpace = Matrix4x4.TRS(-sourceMesh.bounds.min * graph.scale, Quaternion.identity, Vector3.one * graph.scale);
+				var scale = graph.scale;
+				var meshToGraphSpace = Matrix4x4.TRS(-sourceMesh.bounds.min * scale, Quaternion.identity, Vector3.one * scale);
 
 				var promise = JobBuildTileMeshFromVertices.Schedule(vertices, indices, meshToGraphSpace, graph.RecalculateNormals);
-				forcedBoundsSize = sourceMesh.bounds.size * graph.scale;
+				forcedBoundsSize = sourceMesh.bounds.size * scale;
 				tileRect = new IntRect(0, 0, 0, 0);
 				tiles = new NavmeshTile[tileRect.Area];
 				var tilesGCHandle = System.Runtime.InteropServices.GCHandle.Alloc(tiles);
-				var tileWorldSize = new Vector2(forcedBoundsSize.x, forcedBoundsSize.z);
+				var tileLayout = new TileLayout(new Bounds(transform.Transform(forcedBoundsSize*0.5f), forcedBoundsSize), Quaternion.Euler(graph.rotation), 0.001f, 0, false);
+				cutSettings = new NavmeshUpdates.NavmeshUpdateSettings(graph, tileLayout);
+
+				var cutPromise = RecastBuilder.CutTiles(graph, cutSettings.clipperLookup, tileLayout).Schedule(promise);
 				var tileNodeConnections = new NativeArray<JobCalculateTriangleConnections.TileNodeConnectionsUnsafe>(tiles.Length, Allocator.Persistent);
+				var postCutInput = cutPromise.GetValue();
+				var preCutInput = promise.GetValue();
+
+				NativeArray<TileMesh.TileMeshUnsafe> finalTileMeshes;
+				if (postCutInput.tileMeshes.tileMeshes.IsCreated) {
+					UnityEngine.Assertions.Assert.AreEqual(postCutInput.tileMeshes.tileMeshes.Length, tileRect.Area);
+					finalTileMeshes = postCutInput.tileMeshes.tileMeshes;
+				} else {
+					finalTileMeshes = preCutInput.tileMeshes.tileMeshes;
+				}
+
 				var calculateConnectionsJob = new JobCalculateTriangleConnections {
-					tileMeshes = promise.GetValue().tiles,
+					tileMeshes = finalTileMeshes,
 					nodeConnections = tileNodeConnections,
-				}.Schedule(promise.handle);
+				}.Schedule(cutPromise.handle);
+
 				var createTilesJob = new JobCreateTiles {
-					tileMeshes = promise.GetValue().tiles,
+					// If any cutting is done, we need to save the pre-cut data to be able to re-cut tiles later
+					preCutTileMeshes = postCutInput.tileMeshes.tileMeshes.IsCreated ? preCutInput.tileMeshes.tileMeshes : default,
+					tileMeshes = finalTileMeshes,
 					tiles = tilesGCHandle,
 					tileRect = tileRect,
-					graphTileCount = new Int2(tileRect.Width, tileRect.Height),
+					graphTileCount = new Vector2Int(tileRect.Width, tileRect.Height),
 					graphIndex = graph.graphIndex,
 					initialPenalty = graph.initialPenalty,
 					recalculateNormals = graph.recalculateNormals,
 					graphToWorldSpace = transform.matrix,
-					tileWorldSize = tileWorldSize,
-				}.Schedule(promise.handle);
+					tileWorldSize = tileLayout.TileWorldSize,
+				}.Schedule(cutPromise.handle);
 				var applyConnectionsJob = new JobWriteNodeConnections {
 					tiles = tilesGCHandle,
 					nodeConnections = tileNodeConnections,
@@ -319,9 +345,9 @@ namespace Pathfinding {
 
 				yield return applyConnectionsJob;
 
-				var navmeshOutput = promise.Complete();
 				// This has already been used in the createTilesJob
-				navmeshOutput.Dispose();
+				promise.Complete().Dispose();
+				cutPromise.Complete().Dispose();
 				tileNodeConnections.Dispose();
 
 				vertices.Dispose();
@@ -337,6 +363,7 @@ namespace Pathfinding {
 					graph.tileZCount = graph.tileXCount = 1;
 					TriangleMeshNode.SetNavmeshHolder(AstarPath.active.data.GetGraphIndex(graph), graph);
 					graph.FillWithEmptyTiles();
+					graph.navmeshUpdateData.Dispose();
 					return;
 				}
 
@@ -353,9 +380,8 @@ namespace Pathfinding {
 				graph.tileZCount = tileRect.Height;
 				graph.tiles = tiles;
 				TriangleMeshNode.SetNavmeshHolder(graph.active.data.GetGraphIndex(graph), graph);
+				cutSettings.AttachToGraph();
 
-				// Signal that tiles have been recalculated to the navmesh cutting system.
-				graph.navmeshUpdateData.OnRecalculatedTiles(tiles);
 				if (graph.OnRecalculatedTiles != null) graph.OnRecalculatedTiles(tiles.Clone() as NavmeshTile[]);
 			}
 		}

@@ -2,7 +2,7 @@
 
 using System.Collections.Generic;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Pooling {
 	/// <summary>
 	/// Lightweight Stack Pool.
 	/// Handy class for pooling stacks of type T.
@@ -18,7 +18,7 @@ namespace Pathfinding.Util {
 	/// Warning: This class is not thread safe
 	///
 	/// Since: Version 3.2
-	/// See: Pathfinding.Util.ListPool
+	/// See: Pathfinding.Pooling.ListPool
 	/// </summary>
 	public static class StackPool<T> {
 		/// <summary>Internal pool</summary>

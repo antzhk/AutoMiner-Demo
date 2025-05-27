@@ -268,7 +268,6 @@ namespace Pathfinding.Graphs.Grid {
 			}
 
 			// Cast a ray from above downwards to try to find the ground
-#if UNITY_2017_1_OR_NEWER
 			numHits = Physics.RaycastNonAlloc(position+up*fromHeight, -up, hitBuffer, fromHeight+0.005F, heightMask, QueryTriggerInteraction.Ignore);
 			if (numHits == hitBuffer.Length) {
 				// Try again with a larger buffer
@@ -276,11 +275,6 @@ namespace Pathfinding.Graphs.Grid {
 				return CheckHeightAll(position, out numHits);
 			}
 			return hitBuffer;
-#else
-			var result = Physics.RaycastAll(position+up*fromHeight, -up, fromHeight+0.005F, heightMask, QueryTriggerInteraction.Ignore);
-			numHits = result.Length;
-			return result;
-#endif
 		}
 
 		/// <summary>

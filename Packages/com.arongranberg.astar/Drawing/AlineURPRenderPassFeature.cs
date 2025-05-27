@@ -38,6 +38,12 @@ namespace Pathfinding.Drawing {
 				var cameraData = frameData.Get<UniversalCameraData>();
 				var resourceData = frameData.Get<UniversalResourceData>();
 
+				// This could happen if the camera does not have a color target or depth target set.
+				// In that case we are probably rendering some kind of special effect. Skip ALINE rendering in that case.
+				if (!resourceData.activeColorTexture.IsValid() || !resourceData.activeDepthTexture.IsValid()) {
+					return;
+				}
+
 				using (IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass<PassData>("ALINE", out PassData passData, profilingSampler)) {
 					bool allowDisablingWireframe = false;
 

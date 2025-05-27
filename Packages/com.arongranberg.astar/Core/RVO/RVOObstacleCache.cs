@@ -4,11 +4,11 @@ namespace Pathfinding.RVO {
 	using Pathfinding.Util;
 	using Unity.Mathematics;
 	using Unity.Collections;
-	using Unity.Jobs;
+	using Pathfinding.Collections;
 	using System.Collections.Generic;
 	using Unity.Burst;
 	using Unity.Profiling;
-	using Pathfinding.Jobs;
+	using Pathfinding.Sync;
 #if MODULE_COLLECTIONS_2_1_0_OR_NEWER
 	using NativeHashMapIntInt = Unity.Collections.NativeHashMap<int, int>;
 #else
@@ -211,7 +211,7 @@ namespace Pathfinding.RVO {
 		/// <param name="spinLock">Lock to use when allocating from the allocators.</param>
 		/// <param name="simplifyObstacles">If true, the obstacle will be simplified. This means that colinear vertices (when projected onto the movement plane) will be removed.</param>
 		[BurstCompile]
-		public static unsafe void TraceContours (ref UnsafeSpan<ObstacleSegment> obstaclesSpan, ref NativeMovementPlane movementPlane, int obstacleId, UnmanagedObstacle* outputObstacles, ref SlabAllocator<float3> verticesAllocator, ref SlabAllocator<ObstacleVertexGroup> obstaclesAllocator, ref SpinLock spinLock, bool simplifyObstacles) {
+		internal static unsafe void TraceContours (ref UnsafeSpan<ObstacleSegment> obstaclesSpan, ref NativeMovementPlane movementPlane, int obstacleId, UnmanagedObstacle* outputObstacles, ref SlabAllocator<float3> verticesAllocator, ref SlabAllocator<ObstacleVertexGroup> obstaclesAllocator, ref SpinLock spinLock, bool simplifyObstacles) {
 			var obstacles = obstaclesSpan;
 			if (obstacles.Length == 0) {
 				outputObstacles[obstacleId] = new UnmanagedObstacle {

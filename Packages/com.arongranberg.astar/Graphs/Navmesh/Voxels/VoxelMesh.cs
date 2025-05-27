@@ -6,7 +6,7 @@ using Unity.Burst;
 namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 	using System;
 	using Pathfinding.Jobs;
-	using Pathfinding.Util;
+	using Pathfinding.Collections;
 #if MODULE_COLLECTIONS_2_1_0_OR_NEWER
 	using NativeHashMapInt3Int = Unity.Collections.NativeHashMap<Int3, int>;
 #else
@@ -336,8 +336,17 @@ namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 			}
 
 			int openEdges = 0;
+			int multiSharedEdges = 0;
 			for (int i = 0; i < vertexScratch.Length; i++) {
 				if (vertexScratch[i] == 1) openEdges++;
+				else if (vertexScratch[i] > 2) multiSharedEdges++;
+			}
+
+			if (multiSharedEdges > 0) {
+				// This should not happen in valid navmeshes. But if the navmesh for some reason has overlapping triangles due to some other bug,
+				// we should return false here, as otherwise we might end up in an infinite loop when trying to remove the vertex.
+				Debug.LogError($"Vertex has multiple shared edges. This should not happen. Navmesh must be corrupt. Trying to not make it worse.");
+				return false;
 			}
 
 			// There should be no more than 2 open edges.

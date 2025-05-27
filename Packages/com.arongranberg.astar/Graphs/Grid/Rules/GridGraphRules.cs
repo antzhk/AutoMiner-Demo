@@ -139,6 +139,7 @@ namespace Pathfinding.Graphs.Grid.Rules {
 		}
 
 		public void ExecuteRuleMainThread (GridGraphRule.Pass rule, Context context) {
+			if (jobSystemCallbacks == null) Rebuild();
 			if (jobSystemCallbacks[(int)rule] != null && jobSystemCallbacks[(int)rule].Count > 0) throw new System.Exception("A job system pass has been added for the " + rule + " pass. " + rule + " only supports main thread callbacks.");
 			if (context.tracker != null) context.tracker.AllWritesDependency.Complete();
 			CallActions(mainThreadCallbacks[(int)rule], context);
@@ -250,8 +251,9 @@ namespace Pathfinding.Graphs.Grid.Rules {
 			/// After the graph update has been applied to the graph.
 			///
 			/// This pass can only be added as a main-thread pass.
+			/// If many updates are applied to the graph at the same time, this pass will only execute once after all updates have been applied.
 			///
-			/// Warning: No native data in the context is valid at this point. It has all been disposed.
+			/// Warning: No data in the context except the reference to the graph is valid at this point. It has all been disposed.
 			/// You cannot modify any data in this pass.
 			/// </summary>
 			AfterApplied,

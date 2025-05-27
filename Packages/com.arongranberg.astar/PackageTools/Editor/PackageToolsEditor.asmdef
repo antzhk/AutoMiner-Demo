@@ -16,7 +16,7 @@
     "versionDefines": [
         {
             "name": "com.unity.burst",
-            "expression": "1.8.3",
+            "expression": "1.8.7",
             "define": "MODULE_BURST"
         },
         {
@@ -32,11 +32,11 @@
         {
             "name": "com.unity.collections",
             "expression": "0.11-preview",
-            "define": "MODULE_COLLECTIONS_0_11_OR_NEWER"
+            "define": "MODULE_COLLECTIONS_0_11_0_OR_NEWER"
         },
         {
             "name": "com.unity.entities",
-            "expression": "1.0.0-pre.47",
+            "expression": "1.1.0-pre.3",
             "define": "MODULE_ENTITIES"
         }
     ],

@@ -13,7 +13,7 @@ namespace Pathfinding {
 	[System.Serializable]
 	public class AutoRepathPolicy {
 		/// <summary>Policy mode for how often to recalculate an agent's path.</summary>
-		public enum Mode {
+		public enum Mode : byte {
 			/// <summary>
 			/// Never automatically recalculate the path.
 			/// Paths can be recalculated manually by for example calling <see cref="IAstarAI.SearchPath"/> or <see cref="IAstarAI.SetPath"/>.

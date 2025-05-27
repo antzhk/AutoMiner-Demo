@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Pathfinding {
 	using Pathfinding.Jobs;
-	using Pathfinding.Util;
+	using Pathfinding.Pooling;
 	using Unity.Jobs;
 	using Unity.Profiling;
 	using UnityEngine.Assertions;
@@ -181,7 +181,12 @@ namespace Pathfinding {
 			Assert.IsTrue(anyGraphUpdateInProgress);
 
 			if (pendingPromises.Count > 0) {
-				if (!ProcessGraphUpdatePromises(pendingPromises, context, force)) {
+				try {
+					if (ProcessGraphUpdatePromises(pendingPromises, context, force ? TimeSlice.Infinite : TimeSlice.MillisFromNow(2)) != -1) {
+						return false;
+					}
+				} catch (System.Exception e) {
+					Debug.LogError(new System.Exception("Error while updating graphs", e));
 					return false;
 				}
 
@@ -196,9 +201,17 @@ namespace Pathfinding {
 			return true;
 		}
 
-		public static bool ProcessGraphUpdatePromises (List<(IGraphUpdatePromise, IEnumerator<JobHandle>)> promises, IGraphUpdateContext context, bool force = false) {
-			TimeSlice timeSlice = TimeSlice.MillisFromNow(2f);
+		public static int ProcessGraphUpdatePromises (List<(IGraphUpdatePromise, IEnumerator<JobHandle>)> promises, IGraphUpdateContext context, TimeSlice timeSlice) {
+			var r = PrepareGraphUpdatePromises(promises, timeSlice);
+			if (r == -1) {
+				ApplyGraphUpdatePromises(promises, context);
+			}
+			return r;
+		}
+
+		public static int PrepareGraphUpdatePromises (List<(IGraphUpdatePromise, IEnumerator<JobHandle>)> promises, TimeSlice timeSlice) {
 			TimeSlice idleTimeSlice = default;
+			bool async = !timeSlice.isInfinite;
 
 			while (true) {
 				int firstNonFinished = -1;
@@ -206,41 +219,44 @@ namespace Pathfinding {
 				for (int i = 0; i < promises.Count; i++) {
 					var(promise, it) = promises[i];
 					if (it == null) continue;
-					if (force) {
-						it.Current.Complete();
-					} else {
+					if (async) {
 						if (it.Current.IsCompleted) {
+							// If the job completed (maybe because a real job completed, or because the iterator returned a dummy JobHandle), then it must be doing some work on the main thread.
+							// In that case, we shouldn't sleep or yield while waiting.
+							anyMainThreadProgress = true;
 							it.Current.Complete();
 						} else {
 							if (firstNonFinished == -1) firstNonFinished = i;
 							continue;
 						}
+					} else {
+						it.Current.Complete();
 					}
 
-					anyMainThreadProgress = true;
 					MarkerCalculate.Begin();
 					try {
 						if (it.MoveNext()) {
 							if (firstNonFinished == -1) firstNonFinished = i;
 						} else promises[i] = (promise, null);
-					} catch (System.Exception e) {
-						Debug.LogError(new System.Exception("Error while updating graphs.", e));
+					} catch {
+						MarkerCalculate.End();
 						promises[i] = (null, null);
+						throw;
 					}
 					MarkerCalculate.End();
 				}
 
 				if (firstNonFinished == -1) {
 					break;
-				} else if (!force) {
+				} else if (async) {
 					if (timeSlice.expired) {
-						return false;
+						return firstNonFinished;
 					} else if (anyMainThreadProgress) {
 						// Reset the idle time slice if we got something done on the main thread.
 						// This allows us to wait on more very short jobs.
 						idleTimeSlice = TimeSlice.MillisFromNow(0.1f);
 					} else if (idleTimeSlice.expired) {
-						return false;
+						return firstNonFinished;
 					} else {
 						// Allow waiting for a short amount of time to allow very short running
 						// jobs in graph updates to complete without having to wait until the next frame.
@@ -254,6 +270,10 @@ namespace Pathfinding {
 				}
 			}
 
+			return -1;
+		}
+
+		public static void ApplyGraphUpdatePromises (List<(IGraphUpdatePromise, IEnumerator<JobHandle>)> promises, IGraphUpdateContext context) {
 			for (int i = 0; i < promises.Count; i++) {
 				var(promise, it) = promises[i];
 				Assert.IsNull(it);
@@ -261,14 +281,11 @@ namespace Pathfinding {
 					MarkerApply.Begin();
 					try {
 						promise.Apply(context);
-					} catch (System.Exception e) {
-						Debug.LogError(new System.Exception("Error while updating graphs.", e));
+					} finally {
+						MarkerApply.End();
 					}
-					MarkerApply.End();
 				}
 			}
-
-			return true;
 		}
 	}
 }

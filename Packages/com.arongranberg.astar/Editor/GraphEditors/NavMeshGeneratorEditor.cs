@@ -26,11 +26,11 @@ namespace Pathfinding {
 			#pragma warning restore 618
 
 			graph.recalculateNormals = EditorGUILayout.Toggle(new GUIContent("Recalculate Normals", "Disable for spherical graphs or other complicated surfaces that allow the agents to e.g walk on walls or ceilings. See docs for more info."), graph.recalculateNormals);
-			graph.enableNavmeshCutting = EditorGUILayout.Toggle(new GUIContent("Affected by navmesh cuts", "Makes this graph affected by NavmeshCut and NavmeshAdd components. See the documentation for more info."), graph.enableNavmeshCutting);
+			graph.enableNavmeshCutting = EditorGUILayout.Toggle(new GUIContent("Affected By Navmesh Cuts", "Makes this graph affected by NavmeshCut and NavmeshAdd components. See the documentation for more info."), graph.enableNavmeshCutting);
 			if (graph.enableNavmeshCutting) {
 				EditorGUI.indentLevel++;
 				EditorGUI.BeginChangeCheck();
-				var newValue = EditorGUILayout.FloatField(new GUIContent("Agent radius", "Navmesh cuts can optionally be expanded by the agent radius"), graph.navmeshCuttingCharacterRadius);
+				var newValue = EditorGUILayout.FloatField(new GUIContent("Agent Radius", "Navmesh cuts can optionally be expanded by the agent radius"), graph.navmeshCuttingCharacterRadius);
 				if (EditorGUI.EndChangeCheck()) {
 					graph.navmeshCuttingCharacterRadius = Mathf.Max(0, newValue);
 					graph.navmeshUpdateData.ReloadAllTiles();

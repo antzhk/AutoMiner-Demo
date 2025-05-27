@@ -7,6 +7,7 @@ using Unity.Collections;
 using UnityEngine.Profiling;
 using Unity.Entities;
 using Unity.Transforms;
+using Unity.Profiling;
 
 namespace Pathfinding {
 	using Pathfinding.Drawing;
@@ -16,34 +17,45 @@ namespace Pathfinding {
 	using Pathfinding.PID;
 	using Pathfinding.ECS.RVO;
 	using Pathfinding.ECS;
+	using Pathfinding.Collections;
 	using UnityEngine.Assertions;
 
 	/// <summary>
 	/// Movement script that uses ECS.
 	///
-	/// Warning: This script is still in beta and may change in the future. It aims to be much more robust than AIPath/RichAI, but there may still be rough edges.
-	///
 	/// This script is a replacement for the <see cref="AIPath"/> and <see cref="RichAI"/> scripts.
 	///
 	/// This script is a movement script. It takes care of moving an agent along a path, updating the path, and so on.
+	///
+	/// \section followerentity-contents Contents
+	/// \toc
+	///
+	/// \section followerentity-intro Introduction
 	///
 	/// The intended way to use this script is to use these two components:
 	/// - <see cref="FollowerEntity"/>
 	/// - <see cref="AIDestinationSetter"/> (optional, you can instead set the <see cref="destination"/> property manually)
 	///
 	/// Of note is that this component shouldn't be used with a <see cref="Seeker"/> component.
-	/// It instead has its own settings for pathfinding, which are stored in the <see cref="pathfindingSettings"/> field.
+	/// It has its own settings for pathfinding instead, which are stored in the <see cref="pathfindingSettings"/> field.
 	///
-	/// <b>Features</b>
+	/// When used with local avoidance, it also has its own settings for local avoidance which are stored in the <see cref="rvoSettings"/> field,
+	/// instead of using a separate <see cref="RVOController"/> component.
+	///
+	/// Other than that, you can use it just like the other movement scripts in this package.
+	///
+	/// \section followerentity-features Features
 	///
 	/// - Uses Unity's ECS (Entity Component System) to move the agent. This means it is highly-performant and is able to utilize multiple threads.
+	///   You do not need to know anything about ECS to be able to use it.
 	/// - Supports local avoidance (see local-avoidance) (view in online documentation for working links).
 	/// - Supports movement in both 2D and 3D games.
 	/// - Supports movement on spherical on non-planar worlds (see spherical) (view in online documentation for working links).
 	/// - Supports movement on grid graphs as well as navmesh/recast graphs.
+	/// - Not recommended on hexagonal graphs at the moment (though it does mostly work).
 	/// - Does <b>not</b> support movement on point graphs at the moment. This may be added in a future update.
 	/// - Supports time-scales greater than 1. The agent will automatically run multiple simulation steps per frame if the time-scale is greater than 1, to ensure stability.
-	/// - Supports off-mesh links. Subscribe to the <see cref="onTraverseOffMeshLink"/> event to handle this.
+	/// - Supports off-mesh links. See offmeshlinks (view in online documentation for working links) for more info.
 	/// - Knows which node it is traversing at all times (see <see cref="currentNode)"/>.
 	/// - Automatically stops when trying to reach a crowded destination when using local avoidance.
 	/// - Clamps the agent to the navmesh at all times.
@@ -51,7 +63,59 @@ namespace Pathfinding {
 	/// - Can keep a desired distance to walls.
 	/// - Can approach its destination with a desired facing direction.
 	///
-	/// <b>%ECS</b>
+	/// \section followerentity-inspector Inspector
+	///
+	/// <b>Shape</b>
+	/// \inspectorField{Radius, radius}
+	/// \inspectorField{Height, height}
+	/// \inspectorField{Orientation, orientation}
+	///
+	/// <b>Movement</b>
+	/// \inspectorField{Speed, maxSpeed}
+	/// \inspectorField{Rotation Speed, rotationSpeed}
+	/// \inspectorField{Max Rotation Speed, maxRotationSpeed}
+	/// \inspectorField{Allow Rotating On The Spot, movementSettings.follower.allowRotatingOnSpot}
+	/// \inspectorField{Max On Spot Rotation Speed, movementSettings.follower.maxOnSpotRotationSpeed}
+	/// \inspectorField{Slowdown Time When Turning On Spot, movementSettings.follower.slowdownTimeWhenTurningOnSpot}
+	/// \inspectorField{Position Smoothing, positionSmoothing}
+	/// \inspectorField{Rotation Smoothing, rotationSmoothing}
+	/// \inspectorField{Slowdown Time, movementSettings.follower.slowdownTime}
+	/// \inspectorField{Stop Distance, movementSettings.stopDistance}
+	/// \inspectorField{Lead In Radius When Approaching Destination, movementSettings.follower.leadInRadiusWhenApproachingDestination}
+	/// \inspectorField{Desired Wall Distance, movementSettings.follower.desiredWallDistance}
+	/// \inspectorField{Gravity, enableGravity}
+	/// \inspectorField{Raycast Ground Mask, groundMask}
+	/// \inspectorField{Movement Plane Source, movementPlaneSource}
+	///
+	/// <b>%Pathfinding</b>
+	/// \inspectorField{Traversable Graphs, pathfindingSettings.graphMask}
+	/// \inspectorField{Tags/Penalty, pathfindingSettings.tagPenalties}
+	/// \inspectorField{Tags/Traversable, pathfindingSettings.traversableTags}
+	/// \inspectorField{Recalculate Paths Automatically, autoRepath.mode}
+	/// \inspectorField{Period, autoRepath.period}
+	///
+	/// <b>Local Avoidance</b>
+	/// \inspectorField{Enable Local Avoidance, enableLocalAvoidance}
+	/// \inspectorField{Agent Time Horizon, rvoSettings.agentTimeHorizon}
+	/// \inspectorField{Obstacle Time Horizon, rvoSettings.obstacleTimeHorizon}
+	/// \inspectorField{Max Neighbours, rvoSettings.maxNeighbours}
+	/// \inspectorField{Layer, rvoSettings.layer}
+	/// \inspectorField{Collides With, rvoSettings.collidesWith}
+	/// \inspectorField{Priority, rvoSettings.priority}
+	/// \inspectorField{Locked, rvoSettings.locked}
+	///
+	/// <b>Debug</b>
+	/// \inspectorField{Movement Debug Rendering, debugFlags}
+	/// \inspectorField{Local Avoidance Debug Rendering, rvoSettings.debug}
+	/// \inspectorField{Reached Destination, reachedDestination}
+	/// \inspectorField{Reached End Of Path, reachedEndOfPath}
+	/// \inspectorField{Has Path, hasPath}
+	/// \inspectorField{Path Pending, pathPending}
+	/// \inspectorField{Destination, destination}
+	/// \inspectorField{Remaining Distance, remainingDistance}
+	/// \inspectorField{Speed, velocity}
+	///
+	/// \section followerentity-ecs ECS
 	///
 	/// This script uses Unity's ECS (Entity Component System) to move the agent. This means it is highly-performant and is able to utilize multiple threads.
 	/// Internally, an entity is created for the agent with the following components:
@@ -76,6 +140,7 @@ namespace Pathfinding {
 	/// - <see cref="SyncRotationWithTransform"/> - tag component (if <see cref="updateRotation"/> is enabled)
 	/// - <see cref="OrientationYAxisForward"/> - tag component (if <see cref="orientation"/> is <see cref="OrientationMode"/>.YAxisForward)
 	/// - <see cref="ECS.RVO.RVOAgent"/> (if local avoidance is enabled)
+	/// - <see cref="PhysicsSceneRef"/> - shared component
 	///
 	/// Then this script barely does anything by itself. It is a thin wrapper around the ECS components.
 	/// Instead, actual movement calculations are carried out by the following systems:
@@ -83,6 +148,7 @@ namespace Pathfinding {
 	/// - <see cref="SyncTransformsToEntitiesSystem"/> - Updates the entity's transform from the GameObject.
 	/// - <see cref="MovementPlaneFromGraphSystem"/> - Updates the agent's movement plane.
 	/// - <see cref="SyncDestinationTransformSystem"/> - Updates the destination point if the destination transform moves.
+	/// - <see cref="RepairPathSystem"/> - Keeps the agent's path up to date.
 	/// - <see cref="FollowerControlSystem"/> - Calculates how the agent wants to move.
 	/// - <see cref="RVOSystem"/> - Local avoidance calculations.
 	/// - <see cref="FallbackResolveMovementSystem"/> - NOOP system for if local avoidance is disabled.
@@ -93,7 +159,7 @@ namespace Pathfinding {
 	/// This is <b>not</b> a baked component. That is, this script will continue to work even in standalone games. It is designed to be easily used
 	/// without having to care too much about the underlying ECS implementation.
 	///
-	/// <b>Differences compared to AIPath and RichAI</b>
+	/// \section followerentity-differences Differences compared to AIPath and RichAI
 	///
 	/// This movement script has been written to remedy several inconsistency issues with other movement scrips, to provide very smooth movement,
 	/// and "just work" for most games.
@@ -108,8 +174,28 @@ namespace Pathfinding {
 	/// Instead, this script contains its own internal <see cref="FunnelModifier"/> which it uses to simplify the path before it follows it.
 	/// In also doesn't use a separate <see cref="RVOController"/> component for local avoidance, but instead it stores local avoidance settings in <see cref="rvoSettings"/>.
 	///
-	/// <b>Best practices for good performance</b>
+	/// \section followerentity-bestpractices Best practices for good performance
 	///
+	/// Here are some tips for how to improve performance when using this script.
+	/// As always, make sure to profile your game first, to see what is actually causing performance problems.
+	///
+	/// <b>Disable unused features</b>
+	/// This script has some optional parts. Local avoidance, for example. Local avoidance is used to make sure that agents do not overlap with each other.
+	/// However, if you do not need it, you can disable it to improve performance.
+	///
+	/// <b>Don't change the destination unnecessarily</b>
+	/// Repairing the path each frame can be a significant part of the movement calculation time. The FollowerEntity will perform better
+	/// if the <see cref="destination"/> is static, or moves seldom. For example, updating the destination every 10 frames will be faster than updating it every frame,
+	/// but to the player, both will look basically the same.
+	///
+	/// Note: Repairing the path is different from recalculating it from scratch. The agent will recalculate the path from scratch relatively seldom,
+	/// but it will repair it every frame, if necessary, to account for small changes in the agent's position and destination.
+	///
+	/// <b>Disable debug rendering</b>
+	/// Debug rendering has some performance costs in the Unity Editor. Disable all <see cref="debugFlags"/> and <see cref="rvoSettings.debug"/> to improve performance.
+	/// However, in standalone builds, these are automatically disabled and have no cost.
+	///
+	/// <b>Be aware of property access costs</b>
 	/// Using ECS components has some downsides. Accessing properties on this script is significantly slower compared to accessing properties on other movement scripts.
 	/// This is because on each property access, the script has to make sure no jobs are running concurrently, which is a relatively expensive operation.
 	/// Slow is a relative term, though. This only starts to matter if you have lots of agents, maybe a hundred or so. So don't be scared of using it.
@@ -121,12 +207,16 @@ namespace Pathfinding {
 	/// For example, if you want to make the agent follow a particular entity, you could create a new DestinationEntity component which just holds an entity reference,
 	/// and then create a system that every frame copies that entity's position to the <see cref="DestinationPoint.destination"/> field (a component that this entity will always have).
 	///
-	/// This script has some optional parts. Local avoidance, for example. Local avoidance is used to make sure that agents do not overlap each other.
-	/// However, if you do not need it, you can disable it to improve performance.
+	/// \section followerentity-timescale Time scaling
+	/// This component will automatically run multiple simulation steps per frame if the time scale is greater than 1.
+	/// This is done to ensure that the movement remains stable even at high time scales.
+	/// One case when this happens is when fast-forwarding games, which is common in some types of city builders and other types of simulation games.
+	/// This will impact performance at high time scales, but it is necessary to ensure that the movement remains stable.
 	/// </summary>
 	[AddComponentMenu("Pathfinding/AI/Follower Entity (2D,3D)")]
 	[UniqueComponent(tag = "ai")]
 	[UniqueComponent(tag = "rvo")]
+	[DisallowMultipleComponent]
 	public sealed partial class FollowerEntity : VersionedMonoBehaviour, IAstarAI, ISerializationCallbackReceiver {
 		[SerializeField]
 		AgentCylinderShape shape = new AgentCylinderShape {
@@ -149,6 +239,7 @@ namespace Pathfinding {
 			rotationSmoothing = 0f,
 			groundMask = -1,
 			isStopped = false,
+			debugFlags = PIDMovement.DebugFlags.Path,
 		};
 
 		[SerializeField]
@@ -170,6 +261,14 @@ namespace Pathfinding {
 		[SerializeField]
 		MovementPlaneSource movementPlaneSourceBacking = MovementPlaneSource.Graph;
 
+		/// <summary>\copydocref{updatePosition}</summary>
+		[SerializeField]
+		bool syncPosition = true;
+
+		/// <summary>\copydocref{updateRotation}</summary>
+		[SerializeField]
+		bool syncRotation = true;
+
 		/// <summary>Cached transform component</summary>
 		Transform tr;
 
@@ -180,7 +279,7 @@ namespace Pathfinding {
 		///
 		/// Check the class documentation to see which components it usually has, and what systems typically affect it.
 		/// </summary>
-		public Entity entity { get; private set; }
+		public Entity entity { [IgnoredByDeepProfiler] get; private set; }
 
 		static EntityAccess<DestinationPoint> destinationPointAccessRW = new EntityAccess<DestinationPoint>(false);
 		static EntityAccess<DestinationPoint> destinationPointAccessRO = new EntityAccess<DestinationPoint>(true);
@@ -193,6 +292,7 @@ namespace Pathfinding {
 		static EntityAccess<ResolvedMovement> resolvedMovementAccessRW = new EntityAccess<ResolvedMovement>(false);
 		static EntityAccess<MovementControl> movementControlAccessRO = new EntityAccess<MovementControl>(true);
 		static EntityAccess<MovementControl> movementControlAccessRW = new EntityAccess<MovementControl>(false);
+		static EntityAccess<MovementStatistics> movementStatisticsAccessRW = new EntityAccess<MovementStatistics>(false);
 		static ManagedEntityAccess<ManagedState> managedStateAccessRO = new ManagedEntityAccess<ManagedState>(true);
 		static ManagedEntityAccess<ManagedState> managedStateAccessRW = new ManagedEntityAccess<ManagedState>(false);
 		static EntityAccess<ECS.AutoRepathPolicy> autoRepathPolicyRW = new EntityAccess<ECS.AutoRepathPolicy>(false);
@@ -209,9 +309,35 @@ namespace Pathfinding {
 		static EntityArchetype archetype;
 		static World achetypeWorld;
 
+#if !UNITY_2023_1_OR_NEWER
+		bool didStart;
+#endif
+
 		void OnEnable () {
 			scratchReferenceCount++;
+			FindComponents();
+			entity = CreateEntity(tr.position, tr.rotation, tr.localScale.x, ref shape, ref movement, ref autoRepathBacking, managedState, orientationBacking, movementPlaneSourceBacking, syncPosition, syncRotation, PhysicsSceneExtensions.GetPhysicsScene(gameObject.scene));
 
+			// Register with the BatchedEvents system
+			// This is used not for the events, but because it keeps track of a TransformAccessArray
+			// of all components. This is then used by the SyncTransformsToEntitiesSystem.
+			BatchedEvents.Add(this, BatchedEvents.Event.None, (components, ev) => {});
+
+			var runtimeBakers = GetComponents<IRuntimeBaker>();
+			for (int i = 0; i < runtimeBakers.Length; i++) if (((MonoBehaviour)runtimeBakers[i]).enabled) runtimeBakers[i].OnCreatedEntity(World.DefaultGameObjectInjectionWorld, entity);
+
+			// Make sure Start runs every time after OnEnable.
+			// When the game starts we don't want it to run immediately, because the graphs may not be scanned.
+			// But if the component is enabled at some later point in the game, it can run at the same time as OnEnable.
+			if (didStart) Start();
+		}
+
+		/// <summary>
+		/// Creates an entity with the given data.
+		///
+		/// If you don't want to use the FollowerEntity MonoBehaviour, you can use this method to create an equivalent entity directly.
+		/// </summary>
+		public static Entity CreateEntity (float3 position, quaternion rotation, float scale, ref AgentCylinderShape shape, ref MovementSettings movement, ref ECS.AutoRepathPolicy autoRepath, ManagedState managedState, OrientationMode orientation, MovementPlaneSource movementPlaneSource, bool updatePosition, bool updateRotation, PhysicsScene physicsScene) {
 			var world = World.DefaultGameObjectInjectionWorld;
 			if (!archetype.Valid || achetypeWorld != world) {
 				if (world == null) throw new Exception("World.DefaultGameObjectInjectionWorld is null. Has the world been destroyed?");
@@ -237,68 +363,115 @@ namespace Pathfinding {
 					typeof(SyncPositionWithTransform),
 					typeof(SyncRotationWithTransform),
 					typeof(ReadyToTraverseOffMeshLink),
-					typeof(AgentMovementPlaneSource)
+					typeof(AgentMovementPlaneSource),
+					typeof(PhysicsSceneRef)
 					);
 			}
 
-			FindComponents();
+			if (orientation == OrientationMode.YAxisForward) rotation = math.mul(rotation, SyncTransformsToEntitiesSystem.YAxisForwardToZAxisForward);
 
-			entity = world.EntityManager.CreateEntity(archetype);
-			var pos = tr.position;
+			var entityManager = world.EntityManager;
+			var entity = entityManager.CreateEntity(archetype);
 			// This GameObject may be in a hierarchy, but the entity will not be. So we copy the world orientation to the entity's local transform component
-			world.EntityManager.SetComponentData(entity, LocalTransform.FromPositionRotationScale(pos, tr.rotation, tr.localScale.x));
-			world.EntityManager.SetComponentData(entity, new MovementState(pos));
+			entityManager.SetComponentData(entity, LocalTransform.FromPositionRotationScale(position, rotation, scale));
+			entityManager.SetComponentData(entity, new MovementState(position));
 #if UNITY_EDITOR
-			world.EntityManager.SetName(entity, "Follower Entity");
+			entityManager.SetName(entity, "Follower Entity");
 #endif
-			// Set the initial movement plane. This will be overriden before the first simulation loop runs.
-			world.EntityManager.SetComponentData(entity, new AgentMovementPlane(tr.rotation));
-			world.EntityManager.SetComponentData(entity, new DestinationPoint {
+			entityManager.SetComponentData(entity, new DestinationPoint {
 				destination = new float3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity),
 			});
-			autoRepathBacking.Reset();
-			world.EntityManager.SetComponentData(entity, autoRepathBacking);
-			world.EntityManager.SetComponentData(entity, movement);
+			autoRepath.Reset();
+			entityManager.SetComponentData(entity, autoRepath);
+			entityManager.SetComponentData(entity, movement);
 			if (!managedState.pathTracer.isCreated) {
 				managedState.pathTracer = new PathTracer(Allocator.Persistent);
 			}
-			world.EntityManager.SetComponentData(entity, managedState);
-			world.EntityManager.SetComponentData(entity, new MovementStatistics {
+			entityManager.SetComponentData(entity, managedState);
+			entityManager.SetComponentData(entity, new MovementStatistics {
 				estimatedVelocity = float3.zero,
-				lastPosition = pos,
+				lastPosition = position,
 			});
-			world.EntityManager.SetComponentData(entity, shape);
-			world.EntityManager.SetComponentEnabled<GravityState>(entity, managedState.enableGravity);
+			entityManager.SetComponentData(entity, shape);
+			entityManager.SetComponentEnabled<GravityState>(entity, managedState.enableGravity);
 			if (orientation == OrientationMode.YAxisForward) {
-				world.EntityManager.AddComponent<OrientationYAxisForward>(entity);
+				entityManager.AddComponent<OrientationYAxisForward>(entity);
 			}
-			world.EntityManager.SetComponentEnabled<ReadyToTraverseOffMeshLink>(entity, false);
-			world.EntityManager.SetSharedComponent(entity, new AgentMovementPlaneSource { value = movementPlaneSourceBacking });
+			entityManager.SetComponentEnabled<ReadyToTraverseOffMeshLink>(entity, false);
+			entityManager.SetSharedComponent(entity, new AgentMovementPlaneSource { value = movementPlaneSource });
+			entityManager.SetSharedComponent(entity, new PhysicsSceneRef { physicsScene = physicsScene });
+			ToggleComponent<SyncPositionWithTransform>(entity, updatePosition, true);
+			ToggleComponent<SyncRotationWithTransform>(entity, updateRotation, true);
 
-			// Register with the BatchedEvents system
-			// This is used not for the events, but because it keeps track of a TransformAccessArray
-			// of all components. This is then used by the SyncEntitiesToTransformsJob.
-			BatchedEvents.Add(this, BatchedEvents.Event.None, (components, ev) => {});
+			ResolvedMovement resolvedMovement = default;
+			MovementControl movementControl = default;
+			AgentMovementPlane movementPlane = new AgentMovementPlane(rotation);
+			ResetControl(ref resolvedMovement, ref movementControl, ref movementPlane, position, rotation, position);
 
-			var runtimeBakers = GetComponents<IRuntimeBaker>();
-			for (int i = 0; i < runtimeBakers.Length; i++) if (((MonoBehaviour)runtimeBakers[i]).enabled) runtimeBakers[i].OnCreatedEntity(world, entity);
+			// Set the initial movement plane. This will be overriden before the first simulation loop runs.
+			entityManager.SetComponentData(entity, movementPlane);
+
+			entityManager.SetComponentData(entity, resolvedMovement);
+			entityManager.SetComponentData(entity, movementControl);
+
+			return entity;
 		}
 
 		internal void RegisterRuntimeBaker (IRuntimeBaker baker) {
 			if (entityExists) baker.OnCreatedEntity(World.DefaultGameObjectInjectionWorld, entity);
 		}
 
+		/// <summary>Cached NNConstraint, to avoid allocations</summary>
+		static NNConstraint ScratchNNConstraint = NNConstraint.Walkable;
+
 		void Start () {
+#if !UNITY_2023_1_OR_NEWER
+			didStart = true;
+#endif
 			var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 			managedStateAccessRW.Update(entityManager);
-			movementPlaneAccessRO.Update(entityManager);
+			movementPlaneAccessRW.Update(entityManager);
+			resolvedMovementAccessRW.Update(entityManager);
+			movementControlAccessRW.Update(entityManager);
 			if (!managedState.pathTracer.hasPath && AstarPath.active != null) {
-				var nearest = AstarPath.active.GetNearest(position, NNConstraint.Walkable);
+				// Since we haven't calculated a path yet,
+				ScratchNNConstraint.UseSettings(managedState.pathfindingSettings);
+				var nearest = AstarPath.active.GetNearest(position, ScratchNNConstraint);
+
 				if (nearest.node != null) {
 					var storage = entityManager.GetStorageInfo(entity);
-					var movementPlane = movementPlaneAccessRO[storage];
-					managedState.pathTracer.SetFromSingleNode(nearest.node, nearest.position, movementPlane.value);
-					managedState.pathTracer.UpdateEnd(new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity), PathTracer.RepairQuality.High, movementPlane.value, null, null);
+					ref var movementPlane = ref movementPlaneAccessRW[storage];
+					ref var resolvedMovement = ref resolvedMovementAccessRW[storage];
+					ref var movementControl = ref movementControlAccessRW[storage];
+
+					// If we are using the graph's natural movement plane, we need to update our movement plane from the graph
+					// before we start repairing the path. Otherwise the agent can get snapped to a weird point on the navmesh,
+					// if its initial rotation was not aligned with the graph.
+					if (movementPlaneSource == MovementPlaneSource.Graph) {
+						// The target rotations are relative to the movement plane, so we need to patch it, to make sure it stays constant in world space.
+						// This is important when the agent starts with isStopped=true, because the targetRotation will not be recalculated every frame.
+						// TODO: Alternatively we could make sure to always make the new movement plane as similar as possible to the old one,
+						// but this has a minor performance impact every frame.
+						var targetRotation = movementPlane.value.ToWorldRotation(resolvedMovement.targetRotation);
+						var targetRotationHint = movementPlane.value.ToWorldRotation(resolvedMovement.targetRotationHint);
+						var targetRotation2 = movementPlane.value.ToWorldRotation(movementControl.targetRotation);
+						var targetRotationHint2 = movementPlane.value.ToWorldRotation(movementControl.targetRotationHint);
+
+						movementPlane = new AgentMovementPlane(MovementPlaneFromGraphSystem.MovementPlaneFromGraph(nearest.node.Graph));
+						// TODO: Do we need to do a similar thing for the raycast and navmesh normal cases?
+
+						resolvedMovement.targetRotation = movementPlane.value.ToPlane(targetRotation);
+						resolvedMovement.targetRotationHint = movementPlane.value.ToPlane(targetRotationHint);
+						movementControl.targetRotation = movementPlane.value.ToPlane(targetRotation2);
+						movementControl.targetRotationHint = movementPlane.value.ToPlane(targetRotationHint2);
+					}
+
+					// Make the agent's path consist of a single node at the current position.
+					// This is temporary and will be replaced by the actual path when it is calculated.
+					// This allows it to be clamped to the navmesh immediately, instead of waiting for a destination to be set and a path to be calculated.
+					managedState.pathTracer.SetFromSingleNode(nearest.node, nearest.position, movementPlane.value, managedState.pathfindingSettings);
+					// Make the end of the path be unset
+					managedState.pathTracer.UpdateEnd(Vector3.positiveInfinity, PathTracer.RepairQuality.High, movementPlane.value, null, null);
 				}
 			}
 		}
@@ -319,7 +492,12 @@ namespace Pathfinding {
 			BatchedEvents.Remove(this);
 			CancelCurrentPathRequest();
 			if (World.DefaultGameObjectInjectionWorld != null && World.DefaultGameObjectInjectionWorld.IsCreated) World.DefaultGameObjectInjectionWorld.EntityManager.DestroyEntity(entity);
-			managedState.pathTracer.Dispose();
+			// Make sure the managed state gets disposed, even if no entity exists. If an entity exists, this will be automatically called.
+			managedState.Dispose();
+
+			// Note: The entity itself may actually live for another frame to handle cleanup components.
+			// But we want to completely forget about it here.
+			entity = default;
 		}
 
 		/// <summary>\copydoc Pathfinding::IAstarAI::radius</summary>
@@ -352,7 +530,15 @@ namespace Pathfinding {
 			}
 		}
 
-		/// <summary>Pathfinding settings</summary>
+		/// <summary>
+		/// %Pathfinding settings.
+		///
+		/// The settings in this struct controls how the agent calculates paths to its destination.
+		///
+		/// This is analogous to the <see cref="Seeker"/> component used for other movement scripts.
+		///
+		/// See: <see cref="PathRequestSettings"/>
+		/// </summary>
 		public ref PathRequestSettings pathfindingSettings {
 			get {
 				// Complete any job dependencies
@@ -396,6 +582,7 @@ namespace Pathfinding {
 					movementPlaneAccessRO.Update(entityManager);
 					localTransformAccessRW.Update(entityManager);
 					readyToTraverseOffMeshLinkRW.Update(entityManager);
+					autoRepathPolicyRW.Update(entityManager);
 
 					ref var localTransform = ref localTransformAccessRW[storage];
 					localTransform.Position = value;
@@ -412,6 +599,7 @@ namespace Pathfinding {
 							ref var shape = ref agentCylinderShapeAccessRO[storage];
 							ref var movementSettings = ref movementSettingsAccessRO[storage];
 							ref var destinationPoint = ref destinationPointAccessRO[storage];
+							ref var autoRepath = ref autoRepathPolicyRW[storage];
 							var readyToTraverseOffMeshLink = storage.Chunk.GetEnabledMask(ref readyToTraverseOffMeshLinkRW.handle).GetEnabledRefRW<ReadyToTraverseOffMeshLink>(storage.IndexInChunk);
 							if (!nextCornersScratch.IsCreated) nextCornersScratch = new NativeList<float3>(4, Allocator.Persistent);
 							JobRepairPath.Execute(
@@ -419,6 +607,7 @@ namespace Pathfinding {
 								ref movementState,
 								ref shape,
 								ref movementPlane,
+								ref autoRepath,
 								ref destinationPoint,
 								readyToTraverseOffMeshLink,
 								managedState,
@@ -467,7 +656,7 @@ namespace Pathfinding {
 		/// </summary>
 		public OffMeshLinks.OffMeshLinkTracer offMeshLink {
 			get {
-				if (entityStorageCache.Update(World.DefaultGameObjectInjectionWorld, entity, out var entityManager, out var storage) && entityManager.HasComponent<ManagedAgentOffMeshLinkTraversal>(entity)) {
+				if (entityStorageCache.Update(World.DefaultGameObjectInjectionWorld, entity, out var entityManager, out var storage) && entityManager.HasComponent<AgentOffMeshLinkTraversal>(entity)) {
 					agentOffMeshLinkTraversalRO.Update(entityManager);
 					var linkTraversal = agentOffMeshLinkTraversalRO[storage];
 					var linkTraversalManaged = entityManager.GetComponentData<ManagedAgentOffMeshLinkTraversal>(entity);
@@ -591,6 +780,9 @@ namespace Pathfinding {
 		/// The entity internally always treats the Z axis as forward, but this property respects the <see cref="orientation"/> field. So it
 		/// will return either a rotation with the Y axis as forward, or Z axis as forward, depending on the <see cref="orientation"/> field.
 		///
+		/// Note: if <see cref="updateRotation"/> is true (which is the default), this will also set the transform's rotation.
+		/// If <see cref="updateRotation"/> is false, only the agent's internal rotation will be set.
+		///
 		/// This will return the agent's rotation even if <see cref="updateRotation"/> is false.
 		///
 		/// See: <see cref="position"/>
@@ -616,7 +808,11 @@ namespace Pathfinding {
 					localTransformAccessRW.Update(entityManager);
 					localTransformAccessRW[storage].Rotation = value;
 				} else {
-					transform.rotation = value;
+					if (updateRotation) {
+						transform.rotation = value;
+					} else {
+						Debug.LogWarning("Cannot set agent rotation because updateRotation is false and the FollowerEntity component has not been enabled yet. Therefore, the internal entity does not exist, and there's no rotation to set.", this);
+					}
 				}
 			}
 		}
@@ -687,8 +883,49 @@ namespace Pathfinding {
 			}
 		}
 
-		/// <summary>\copydoc Pathfinding::IAstarAI::velocity</summary>
-		public Vector3 velocity => entityExists ? (Vector3)World.DefaultGameObjectInjectionWorld.EntityManager.GetComponentData<MovementStatistics>(entity).estimatedVelocity : Vector3.zero;
+		/// <summary>\copydocref{PIDMovement.rotationSpeed}</summary>
+		public float rotationSpeed {
+			get => movement.follower.rotationSpeed;
+			set {
+				movement.follower.rotationSpeed = value;
+				if (entityStorageCache.GetComponentData(entity, ref movementSettingsAccessRW, out var movementSettings)) {
+					movementSettings.value.follower.rotationSpeed = value;
+				}
+			}
+		}
+
+		/// <summary>\copydocref{PIDMovement.maxRotationSpeed}</summary>
+		public float maxRotationSpeed {
+			get => movement.follower.maxRotationSpeed;
+			set {
+				movement.follower.maxRotationSpeed = value;
+				if (entityStorageCache.GetComponentData(entity, ref movementSettingsAccessRW, out var movementSettings)) {
+					movementSettings.value.follower.maxRotationSpeed = value;
+				}
+			}
+		}
+
+		/// <summary>
+		/// Actual velocity that the agent is moving with.
+		/// In world units per second.
+		///
+		/// This is useful for, for example, selecting which animations to play, and at what speeds.
+		///
+		/// Note: Any value set here will be overriden during the next simulation step. Nevertheless, it can be useful to set this value if you have disabled the agent's movement logic using e.g. <see cref="canMove"/>.
+		/// This value is only an output statistic. It is not used to control the agent's movement.
+		///
+		/// See: <see cref="desiredVelocity"/>
+		/// </summary>
+		public Vector3 velocity {
+			get {
+				return entityExists ? (Vector3)World.DefaultGameObjectInjectionWorld.EntityManager.GetComponentData<MovementStatistics>(entity).estimatedVelocity : Vector3.zero;
+			}
+			set {
+				if (entityStorageCache.GetComponentData(entity, ref movementStatisticsAccessRW, out var statistics)) {
+					statistics.value.estimatedVelocity = (float3)value;
+				}
+			}
+		}
 
 		/// <summary>\copydoc Pathfinding::IAstarAI::desiredVelocity</summary>
 		public Vector3 desiredVelocity {
@@ -756,6 +993,19 @@ namespace Pathfinding {
 					movement.stopDistance = value;
 					if (entityStorageCache.GetComponentData(entity, ref movementSettingsAccessRW, out var movementSettings)) {
 						movementSettings.value.stopDistance = value;
+					}
+				}
+			}
+		}
+
+		/// <summary>\copydocref{MovementSettings.positionSmoothing}</summary>
+		public float positionSmoothing {
+			get => movement.positionSmoothing;
+			set {
+				if (movement.positionSmoothing != value) {
+					movement.positionSmoothing = value;
+					if (entityStorageCache.GetComponentData(entity, ref movementSettingsAccessRW, out var movementSettings)) {
+						movementSettings.value.positionSmoothing = value;
 					}
 				}
 			}
@@ -850,8 +1100,6 @@ namespace Pathfinding {
 		static NativeArray<int> indicesScratch;
 		static int scratchReferenceCount = 0;
 
-		/// <summary>\copydoc Pathfinding::IAstarAI::destination</summary>
-
 		/// <summary>
 		/// Position in the world that this agent should move to.
 		///
@@ -935,6 +1183,7 @@ namespace Pathfinding {
 			agentCylinderShapeAccessRO.Update(entityManager);
 			movementSettingsAccessRO.Update(entityManager);
 			localTransformAccessRO.Update(entityManager);
+			autoRepathPolicyRW.Update(entityManager);
 			destinationPointAccessRW.Update(entityManager);
 			movementPlaneAccessRO.Update(entityManager);
 			readyToTraverseOffMeshLinkRW.Update(entityManager);
@@ -958,6 +1207,7 @@ namespace Pathfinding {
 					ref var shape = ref agentCylinderShapeAccessRO[storage];
 					ref var movementSettings = ref movementSettingsAccessRO[storage];
 					ref var localTransform = ref localTransformAccessRO[storage];
+					ref var autoRepath = ref autoRepathPolicyRW[storage];
 					ref var destinationPoint = ref destinationPointAccessRW[storage];
 					var readyToTraverseOffMeshLink = storage.Chunk.GetEnabledMask(ref readyToTraverseOffMeshLinkRW.handle).GetEnabledRefRW<ReadyToTraverseOffMeshLink>(storage.IndexInChunk);
 					if (!nextCornersScratch.IsCreated) nextCornersScratch = new NativeList<float3>(4, Allocator.Persistent);
@@ -966,6 +1216,7 @@ namespace Pathfinding {
 						ref movementState,
 						ref shape,
 						ref movementPlane,
+						ref autoRepath,
 						ref destinationPoint,
 						readyToTraverseOffMeshLink,
 						managedState,
@@ -983,7 +1234,7 @@ namespace Pathfinding {
 		/// <summary>
 		/// Policy for when the agent recalculates its path.
 		///
-		/// See: <see cref="AutoRepathPolicy"/>
+		/// See: <see cref="ECS.AutoRepathPolicy"/>
 		/// </summary>
 		public ECS.AutoRepathPolicy autoRepath {
 			get {
@@ -1026,6 +1277,8 @@ namespace Pathfinding {
 		/// Disabling this will remove the <see cref="SimulateMovement"/> component from the entity, which prevents
 		/// most systems from running for this entity.
 		///
+		/// When disabled, the <see cref="velocity"/> property will no longer update.
+		///
 		/// See: <see cref="autoRepath"/>
 		/// See: <see cref="isStopped"/>
 		/// </summary>
@@ -1047,6 +1300,9 @@ namespace Pathfinding {
 		///
 		/// If gravity is enabled, the agent will accelerate downwards, and use a raycast to check if it should stop falling.
 		///
+		/// This has no effect if the agent's <see cref="orientation"/> is set to YAxisForward (2D mode).
+		/// Gravity does not really make sense for top-down 2D games. The gravity setting is also hidden from the inspector in this mode.
+		///
 		/// See: <see cref="groundMask"/>
 		/// </summary>
 		public bool enableGravity {
@@ -1064,7 +1320,11 @@ namespace Pathfinding {
 			}
 		}
 
-		/// <summary>\copydocref{ManagedState.enableLocalAvoidance}</summary>
+		/// <summary>
+		/// \copydocref{ManagedState.enableLocalAvoidance}
+		///
+		/// See: <see cref="rvoSettings"/>
+		/// </summary>
 		public bool enableLocalAvoidance {
 			get => managedState.enableLocalAvoidance;
 			set => managedState.enableLocalAvoidance = value;
@@ -1082,12 +1342,33 @@ namespace Pathfinding {
 		/// See: <see cref="updateRotation"/>
 		/// </summary>
 		public bool updatePosition {
-			get {
-				if (!entityExists) return true;
-				var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-				return entityManager.HasComponent<SyncPositionWithTransform>(entity);
+			get => syncPosition;
+			set {
+				syncPosition = value;
+				ToggleComponent<SyncPositionWithTransform>(entity, value, false);
 			}
-			set => ToggleComponent<SyncPositionWithTransform>(entity, value, true);
+		}
+
+		/// <summary>
+		/// Determines if the character's rotation should be coupled to the Transform's rotation.
+		/// If false then all movement calculations will happen as usual, but the GameObject that this component is attached to will not rotate.
+		/// Instead, only the <see cref="rotation"/> property and the internal entity's rotation will change.
+		///
+		/// This is particularly useful for 2D games where you want the Transform to stay in the same orientation, and instead swap out the displayed
+		/// sprite to indicate the direction the character is facing.
+		///
+		/// You can enable <see cref="PIDMovement.DebugFlags"/>.Rotation in <see cref="debugFlags"/> to draw a gizmos arrow in the scene view to indicate the agent's internal rotation.
+		///
+		/// See: <see cref="updatePosition"/>
+		/// See: <see cref="rotation"/>
+		/// See: <see cref="orientation"/>
+		/// </summary>
+		public bool updateRotation {
+			get => syncRotation;
+			set {
+				syncRotation = value;
+				ToggleComponent<SyncRotationWithTransform>(entity, value, false);
+			}
 		}
 
 		/// <summary>
@@ -1108,26 +1389,6 @@ namespace Pathfinding {
 					ToggleComponent<OrientationYAxisForward>(entity, value == OrientationMode.YAxisForward, false);
 				}
 			}
-		}
-
-		/// <summary>
-		/// Determines if the character's rotation should be coupled to the Transform's rotation.
-		/// If false then all movement calculations will happen as usual, but the GameObject that this component is attached to will not rotate.
-		/// Instead, only the <see cref="rotation"/> property and the internal entity's rotation will change.
-		///
-		/// You can enable <see cref="PIDMovement.DebugFlags"/>.Rotation in <see cref="debugFlags"/> to draw a gizmos arrow in the scene view to indicate the agent's internal rotation.
-		///
-		/// See: <see cref="updatePosition"/>
-		/// See: <see cref="rotation"/>
-		/// See: <see cref="orientation"/>
-		/// </summary>
-		public bool updateRotation {
-			get {
-				if (!entityExists) return true;
-				var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-				return entityManager.HasComponent<SyncRotationWithTransform>(entity);
-			}
-			set => ToggleComponent<SyncRotationWithTransform>(entity, value, true);
 		}
 
 		/// <summary>Adds or removes a component from an entity</summary>
@@ -1397,6 +1658,7 @@ namespace Pathfinding {
 						// We need to check if the path is stale after each part because the path tracer may have realized that some nodes are destroyed
 						stale |= pathTracer.isStale;
 					}
+					pathTracer.Dispose();
 				}
 
 				nativeBuffer.AsUnsafeSpan().Reinterpret<Vector3>().CopyTo(buffer);
@@ -1421,7 +1683,10 @@ namespace Pathfinding {
 			var dest = destination;
 			if (!float.IsFinite(dest.x)) return;
 
-			SetPath(ABPath.Construct(position, dest, null), false);
+			var movementPlane = this.movementPlane;
+			var path = ABPath.Construct(position, dest, null);
+			path.UseSettings(managedState.pathfindingSettings);
+			SetPath(path, false);
 		}
 
 		void AssertEntityExists () {
@@ -1482,15 +1747,19 @@ namespace Pathfinding {
 				managedState.CancelCurrentPathRequest();
 				movementState.SetPathIsEmpty(localTransform.Position);
 
-				// This emulates what the ControlJob does when the agent has no path.
+				// This emulates what JobControl does when the agent has no path.
 				// This ensures that properties like #desiredVelocity return the correct value immediately after the path has been cleared.
-				resolvedMovement.targetPoint = localTransform.Position;
-				resolvedMovement.speed = 0;
-				resolvedMovement.targetRotation = movementPlane.value.ToPlane(localTransform.Rotation);
-				controlOutput.endOfPath = movementState.endOfPath;
-				controlOutput.speed = 0f;
-				controlOutput.targetPoint = localTransform.Position;
+				ResetControl(ref resolvedMovement, ref controlOutput, ref movementPlane, localTransform.Position, localTransform.Rotation, movementState.endOfPath);
 			}
+		}
+
+		static void ResetControl (ref ResolvedMovement resolvedMovement, ref MovementControl controlOutput, ref AgentMovementPlane movementPlane, float3 position, quaternion rotation, float3 endOfPath) {
+			resolvedMovement.targetPoint = position;
+			resolvedMovement.speed = 0;
+			resolvedMovement.targetRotation = resolvedMovement.targetRotationHint = controlOutput.targetRotation = controlOutput.targetRotationHint = movementPlane.value.ToPlane(rotation);
+			controlOutput.endOfPath = endOfPath;
+			controlOutput.speed = 0f;
+			controlOutput.targetPoint = position;
 		}
 
 		/// <summary>
@@ -1503,7 +1772,6 @@ namespace Pathfinding {
 		/// In case the path has already been calculated, it will immediately replace the current path the AI is following.
 		///
 		/// If you pass null path, then the current path will be cleared and the agent will stop moving.
-		/// The agent will also abort traversing any off-mesh links it is currently traversing.
 		/// Note than unless you have also disabled <see cref="canSearch"/>, then the agent will soon recalculate its path and start moving again.
 		///
 		/// Note: Stopping the agent by passing a null path works. But this will stop the agent instantly, and it will not be able to use local avoidance or know its place on the navmesh.
@@ -1512,7 +1780,7 @@ namespace Pathfinding {
 		/// You can disable the automatic path recalculation by setting the <see cref="canSearch"/> field to false.
 		///
 		/// Note: This call will be ignored if the agent is currently traversing an off-mesh link.
-		/// Furthermore, if the agent starts traversing an off-mesh link, the current path request will be canceled (if one is currently in progress).
+		/// Furthermore, when an agent starts traversing an off-mesh link, the current path request will be canceled (if one is currently in progress).
 		///
 		/// <code>
 		/// IEnumerator Start () {
@@ -1520,6 +1788,10 @@ namespace Pathfinding {
 		///     // Make the AI flee from an enemy.
 		///     // The path will be about 20 world units long (the default cost of moving 1 world unit is 1000).
 		///     var path = FleePath.Construct(ai.position, pointToAvoid, 1000 * 20);
+		///
+		///     // Make the path use the same traversable tags and other pathfinding settings as set in the FollowerEntity inspector
+		///     path.UseSettings(ai.pathfindingSettings);
+		///
 		///     ai.SetPath(path);
 		///
 		///     while (!ai.reachedEndOfPath) {
@@ -1527,13 +1799,20 @@ namespace Pathfinding {
 		///     }
 		/// }
 		/// </code>
+		///
+		/// See: calling-pathfinding (view in online documentation for working links)
+		/// See: example_path_types (view in online documentation for working links)
 		/// </summary>
 		/// <param name="path">The path to follow.</param>
 		/// <param name="updateDestinationFromPath">If true, the \reflink{destination} property will be set to the end point of the path. If false, the previous destination value will be kept.
 		///     If you pass a path which has no well defined destination before it is calculated (e.g. a MultiTargetPath or RandomPath), then the destination will be first be cleared, but once the path has been calculated, it will be set to the end point of the path.</param>
 		public void SetPath(Path path, bool updateDestinationFromPath = true) => SetPath(entity, path, updateDestinationFromPath);
 
-		/// <summary>\copydocref{SetPath(Path,bool)}</summary>
+		/// <summary>
+		/// \copydocref{SetPath(Path,bool)}
+		///
+		/// Note: This static method is used if you only have an entity reference. If you are working with a GameObject, you can use the instance method instead.
+		/// </summary>
 		public static void SetPath (Entity entity, Path path, bool updateDestinationFromPath = true) {
 			var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 			if (!entityManager.Exists(entity)) throw new System.InvalidOperationException("Entity does not exist. You can only assign a path if the component is active and enabled.");
@@ -1544,6 +1823,7 @@ namespace Pathfinding {
 			movementStateAccessRW.Update(entityManager);
 			localTransformAccessRO.Update(entityManager);
 			destinationPointAccessRW.Update(entityManager);
+			autoRepathPolicyRW.Update(entityManager);
 
 			var storage = entityManager.GetStorageInfo(entity);
 
@@ -1565,11 +1845,12 @@ namespace Pathfinding {
 			ref var movementState = ref movementStateAccessRW[storage];
 			ref var localTransform = ref localTransformAccessRO[storage];
 			ref var destination = ref destinationPointAccessRW[storage];
+			ref var autoRepathPolicy = ref autoRepathPolicyRW[storage];
 
 			if (updateDestinationFromPath && path is ABPath abPath) {
 				// If the user supplies a new ABPath manually, they probably want the agent to move to that point.
 				// So by default we update the destination to match the path.
-				if (abPath.endPointKnownBeforeCalculation) {
+				if (abPath.endPointKnownBeforeCalculation || abPath.IsDone()) {
 					destination = new DestinationPoint { destination = abPath.originalEndPoint, facingDirection = default };
 				} else {
 					// If the destination is not known, we set it to positive infinity.
@@ -1578,9 +1859,16 @@ namespace Pathfinding {
 				}
 			}
 
+			// The FollowerEntity works best with a ClosestAsSeenFromAboveSoft distance metric
+			path.nnConstraint.distanceMetric = DistanceMetric.ClosestAsSeenFromAboveSoft(movementPlane.value.up);
+
+			autoRepathPolicy.OnScheduledPathRecalculation(destination.destination, (float)World.DefaultGameObjectInjectionWorld.Time.ElapsedTime);
+			if (path.IsDone()) autoRepathPolicy.OnPathCalculated(path.error);
 			ManagedState.SetPath(path, managedState, in movementPlane, ref destination);
 
-			if (path.IsDone()) {
+			// Check if we have started to follow the path.
+			// If it wasn't calculated yet, it will have just been scheduled to be calculated, and will be applied later.
+			if (managedState.activePath == path) {
 				agentCylinderShapeAccessRO.Update(entityManager);
 				movementSettingsAccessRO.Update(entityManager);
 				readyToTraverseOffMeshLinkRW.Update(entityManager);
@@ -1600,6 +1888,7 @@ namespace Pathfinding {
 						ref movementState,
 						ref shape,
 						ref movementPlane,
+						ref autoRepathPolicy,
 						ref destination,
 						readyToTraverseOffMeshLink,
 						managedState,
@@ -1642,10 +1931,11 @@ namespace Pathfinding {
 					// TODO: Should we use the from-above distance metric here?
 					// This would fail when used on a spherical world and the agent was teleported
 					// to another part of the sphere.
-					var nearest = AstarPath.active.GetNearest(newPosition, NNConstraint.Walkable);
+					ScratchNNConstraint.UseSettings(managedState.pathfindingSettings);
+					var nearest = AstarPath.active.GetNearest(newPosition, ScratchNNConstraint);
 					if (nearest.node != null) {
 						var movementPlane = movementPlaneAccessRO[storage];
-						managedState.pathTracer.SetFromSingleNode(nearest.node, nearest.position, movementPlane.value);
+						managedState.pathTracer.SetFromSingleNode(nearest.node, nearest.position, movementPlane.value, managedState.pathfindingSettings);
 					}
 				}
 
@@ -1665,7 +1955,9 @@ namespace Pathfinding {
 		static readonly Color ShapeGizmoColor = new Color(240/255f, 213/255f, 30/255f);
 
 		public override void DrawGizmos () {
-			if (!Application.isPlaying || !enabled) FindComponents();
+			// This may be called before the component has been enabled.
+			// For example outside of play mode, or even in play mode when in prefab isolation mode
+			if (tr == null) FindComponents();
 
 			var color = ShapeGizmoColor;
 			var destination = this.destination;
@@ -1717,14 +2009,9 @@ namespace Pathfinding {
 					this.pathfindingSettings = PathRequestSettings.Default;
 				}
 			}
-			#pragma warning disable 618
-			if (migrations.AddAndMaybeRunMigration((int)FollowerEntityMigrations.MigrateMovementPlaneSource, unityThread)) {
-				this.movementPlaneSource = this.movement.movementPlaneSource;
-			}
-			if (migrations.AddAndMaybeRunMigration((int)FollowerEntityMigrations.MigrateAutoRepathPolicy, unityThread)) {
-				this.autoRepathBacking = new ECS.AutoRepathPolicy(managedState.autoRepath);
-			}
-			#pragma warning restore 618
+			// Old migrations that cannot run anymore
+			migrations.AddAndMaybeRunMigration((int)FollowerEntityMigrations.MigrateMovementPlaneSource);
+			migrations.AddAndMaybeRunMigration((int)FollowerEntityMigrations.MigrateAutoRepathPolicy);
 		}
 
 #if UNITY_EDITOR
@@ -1748,8 +2035,10 @@ namespace Pathfinding {
 			SyncWithEntity(managedStateAccessRW[storage], ref agentCylinderShapeAccessRW[storage], ref movementSettingsAccessRW[storage]);
 
 			// Structural changes
-			ToggleComponent<GravityState>(entity, enableGravity, false);
+			ToggleComponent<GravityState>(entity, managedState.enableGravity, false);
 			ToggleComponent<OrientationYAxisForward>(entity, orientation == OrientationMode.YAxisForward, false);
+			this.updatePosition = this.updatePosition;
+			this.updateRotation = this.updateRotation;
 			this.movementPlaneSource = this.movementPlaneSource;
 		}
 
@@ -1761,13 +2050,13 @@ namespace Pathfinding {
 		public void SyncWithEntity (ManagedState managedState, ref AgentCylinderShape shape, ref MovementSettings movementSettings) {
 			movementSettings = this.movement;
 			shape = this.shape;
-			// Copy all fields to the managed state object.
-			// Don't copy the PathTracer or the onTraverseOffMeshLink, though, since they are not serialized
-			#pragma warning disable 618
-			managedState.autoRepath = this.managedState.autoRepath;
-			#pragma warning restore 618
+			// Copy all serialized fields to the managed state object.
+			// This excludes the PathTracer, onTraverseOffMeshLink and pathfindingSettings.traversalProvider, since they are not serialized
+			var traversalProvider = managedState.pathfindingSettings.traversalProvider;
 			managedState.rvoSettings = this.managedState.rvoSettings;
 			managedState.enableLocalAvoidance = this.managedState.enableLocalAvoidance;
+			managedState.pathfindingSettings = this.managedState.pathfindingSettings;
+			managedState.pathfindingSettings.traversalProvider = traversalProvider;
 			// Replace this instance of the managed state with the entity component
 			this.managedState = managedState;
 			// Note: RVO settings are copied every frame automatically before local avoidance simulations

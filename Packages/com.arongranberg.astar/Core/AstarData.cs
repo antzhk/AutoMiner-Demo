@@ -4,10 +4,7 @@ using System.Collections.Generic;
 using Pathfinding.WindowsStore;
 using Pathfinding.Serialization;
 using Pathfinding.Util;
-#if UNITY_WINRT && !UNITY_EDITOR
-//using MarkerMetro.Unity.WinLegacy.IO;
-//using MarkerMetro.Unity.WinLegacy.Reflection;
-#endif
+using Pathfinding.Sync;
 
 namespace Pathfinding {
 	[System.Serializable]
@@ -19,11 +16,19 @@ namespace Pathfinding {
 	/// </summary>
 	public class AstarData {
 		/// <summary>The AstarPath component which owns this AstarData</summary>
-		internal AstarPath active;
+		AstarPath active;
 
 		#region Fields
+		/// <summary>
+		/// Shortcut to the first <see cref="NavMeshGraph"/>
+		///
+		/// Deprecated: Use <see cref="navmeshGraph"/> instead
+		/// </summary>
+		[System.Obsolete("Use navmeshGraph instead")]
+		public NavMeshGraph navmesh => navmeshGraph;
+
 		/// <summary>Shortcut to the first <see cref="NavMeshGraph"/></summary>
-		public NavMeshGraph navmesh { get; private set; }
+		public NavMeshGraph navmeshGraph { get; private set; }
 
 #if !ASTAR_NO_GRID_GRAPH
 		/// <summary>Shortcut to the first <see cref="GridGraph"/></summary>
@@ -48,7 +53,7 @@ namespace Pathfinding {
 		/// All supported graph types.
 		/// Populated through reflection search
 		/// </summary>
-		public System.Type[] graphTypes { get; private set; }
+		public static System.Type[] graphTypes { get; private set; }
 
 #if ASTAR_FAST_NO_EXCEPTIONS || UNITY_WINRT || UNITY_WEBGL
 		/// <summary>
@@ -101,7 +106,9 @@ namespace Pathfinding {
 
 		/// <summary>
 		/// Serialized data for cached startup.
-		/// If set, on start the graphs will be deserialized from this file.
+		/// If set, and <see cref="cacheStartup"/> is enabled, graphs will be deserialized from this file when the game starts.
+		///
+		/// [Open online documentation to see images]
 		/// </summary>
 		public TextAsset file_cachedStartup;
 
@@ -110,14 +117,19 @@ namespace Pathfinding {
 		/// Caching the startup means saving the whole graphs - not only the settings - to a file (<see cref="file_cachedStartup)"/> which can
 		/// be loaded when the game starts. This is usually much faster than scanning the graphs when the game starts. This is configured from the editor under the "Save & Load" tab.
 		///
+		/// [Open online documentation to see images]
+		///
 		/// See: save-load-graphs (view in online documentation for working links)
 		/// </summary>
 		[SerializeField]
 		public bool cacheStartup;
 
-		//End Serialization Settings
-
 		List<bool> graphStructureLocked = new List<bool>();
+
+		static readonly Unity.Profiling.ProfilerMarker MarkerLoadFromCache = new Unity.Profiling.ProfilerMarker("LoadFromCache");
+		static readonly Unity.Profiling.ProfilerMarker MarkerDeserializeGraphs = new Unity.Profiling.ProfilerMarker("DeserializeGraphs");
+		static readonly Unity.Profiling.ProfilerMarker MarkerSerializeGraphs = new Unity.Profiling.ProfilerMarker("SerializeGraphs");
+		static readonly Unity.Profiling.ProfilerMarker MarkerFindGraphTypes = new Unity.Profiling.ProfilerMarker("FindGraphTypes");
 
 		#endregion
 
@@ -125,17 +137,21 @@ namespace Pathfinding {
 			this.active = active;
 		}
 
+		/// <summary>Get the serialized data for all graphs and their settings</summary>
 		public byte[] GetData() => data;
 
+		/// <summary>
+		/// Set the serialized data for all graphs and their settings.
+		///
+		/// During runtime you usually want to deserialize the graphs immediately, in which case you should use <see cref="DeserializeGraphs(byte"/>[]) instead.
+		/// </summary>
 		public void SetData (byte[] data) {
 			this.data = data;
 		}
 
 		/// <summary>Loads the graphs from memory, will load cached graphs if any exists</summary>
 		public void OnEnable () {
-			if (graphTypes == null) {
-				FindGraphTypes();
-			}
+			FindGraphTypes();
 
 			if (graphs == null) graphs = new NavGraph[0];
 
@@ -215,7 +231,7 @@ namespace Pathfinding {
 		/// But these references ease the use of the system, so I decided to keep them.
 		/// </summary>
 		public void UpdateShortcuts () {
-			navmesh = (NavMeshGraph)FindGraphOfType(typeof(NavMeshGraph));
+			navmeshGraph = (NavMeshGraph)FindGraphOfType(typeof(NavMeshGraph));
 
 #if !ASTAR_NO_GRID_GRAPH
 			gridGraph = (GridGraph)FindGraphOfType(typeof(GridGraph));
@@ -232,17 +248,17 @@ namespace Pathfinding {
 
 		/// <summary>Load from data from <see cref="file_cachedStartup"/></summary>
 		public void LoadFromCache () {
-			var graphLock = AssertSafe();
+			using var _ = MarkerLoadFromCache.Auto();
+			using (AssertSafe()) {
+				if (file_cachedStartup != null) {
+					var bytes = file_cachedStartup.bytes;
+					DeserializeGraphs(bytes);
 
-			if (file_cachedStartup != null) {
-				var bytes = file_cachedStartup.bytes;
-				DeserializeGraphs(bytes);
-
-				GraphModifier.TriggerEvent(GraphModifier.EventType.PostCacheLoad);
-			} else {
-				Debug.LogError("Can't load from cache since the cache is empty");
+					GraphModifier.TriggerEvent(GraphModifier.EventType.PostCacheLoad);
+				} else {
+					Debug.LogError("Can't load from cache since the cache is empty");
+				}
 			}
-			graphLock.Release();
 		}
 
 		#region Serialization
@@ -270,19 +286,26 @@ namespace Pathfinding {
 		/// A similar function exists in the AstarPathEditor.cs script to save additional info
 		/// </summary>
 		public byte[] SerializeGraphs (SerializeSettings settings, out uint checksum) {
-			var graphLock = AssertSafe();
-			var sr = new AstarSerializer(this, settings, active.gameObject);
+			return SerializeGraphs(settings, out checksum, graphs);
+		}
 
-			sr.OpenSerialize();
-			sr.SerializeGraphs(graphs);
-			sr.SerializeExtraInfo();
-			byte[] bytes = sr.CloseSerialize();
-			checksum = sr.GetChecksum();
+		byte[] SerializeGraphs (SerializeSettings settings, out uint checksum, NavGraph[] graphs) {
+			MarkerSerializeGraphs.Begin();
+			using (AssertSafe()) {
+				var sr = new AstarSerializer(this, settings, active.gameObject);
+
+				sr.OpenSerialize();
+				sr.SerializeGraphs(graphs);
+				sr.SerializeExtraInfo();
+				byte[] bytes = sr.CloseSerialize();
+				checksum = sr.GetChecksum();
 #if ASTARDEBUG
-			Debug.Log("Got a whole bunch of data, "+bytes.Length+" bytes");
+				Debug.Log("Got a whole bunch of data, "+bytes.Length+" bytes");
 #endif
-			graphLock.Release();
-			return bytes;
+
+				MarkerSerializeGraphs.End();
+				return bytes;
+			}
 		}
 
 		/// <summary>Deserializes graphs from <see cref="data"/></summary>
@@ -298,48 +321,47 @@ namespace Pathfinding {
 		/// See: <see cref="RemoveGraph"/>
 		/// </summary>
 		public void ClearGraphs () {
-			var graphLock = AssertSafe();
-
-			ClearGraphsInternal();
-			graphLock.Release();
+			using (AssertSafe()) {
+				ClearGraphsInternal();
+			}
 		}
 
 		void ClearGraphsInternal () {
 			if (graphs == null) return;
-			var graphLock = AssertSafe();
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] != null) {
-					active.DirtyBounds(graphs[i].bounds);
-					((IGraphInternals)graphs[i]).OnDestroy();
-					graphs[i].active = null;
+			using (AssertSafe()) {
+				for (int i = 0; i < graphs.Length; i++) {
+					if (graphs[i] != null) {
+						active.DirtyBounds(graphs[i].bounds);
+						((IGraphInternals)graphs[i]).OnDestroy();
+						graphs[i].active = null;
+					}
 				}
+				graphs = new NavGraph[0];
+				UpdateShortcuts();
 			}
-			graphs = new NavGraph[0];
-			UpdateShortcuts();
-			graphLock.Release();
 		}
 
 		public void DisposeUnmanagedData () {
 			if (graphs == null) return;
-			var graphLock = AssertSafe();
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] != null) {
-					((IGraphInternals)graphs[i]).DisposeUnmanagedData();
+			using (AssertSafe()) {
+				for (int i = 0; i < graphs.Length; i++) {
+					if (graphs[i] != null) {
+						((IGraphInternals)graphs[i]).DisposeUnmanagedData();
+					}
 				}
 			}
-			graphLock.Release();
 		}
 
 		/// <summary>Makes all graphs become unscanned</summary>
 		internal void DestroyAllNodes () {
 			if (graphs == null) return;
-			var graphLock = AssertSafe();
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] != null) {
-					((IGraphInternals)graphs[i]).DestroyAllNodes();
+			using (AssertSafe()) {
+				for (int i = 0; i < graphs.Length; i++) {
+					if (graphs[i] != null) {
+						((IGraphInternals)graphs[i]).DestroyAllNodes();
+					}
 				}
 			}
-			graphLock.Release();
 		}
 
 		public void OnDestroy () {
@@ -347,61 +369,74 @@ namespace Pathfinding {
 		}
 
 		/// <summary>
-		/// Deserializes graphs from the specified byte array.
+		/// Deserializes and loads graphs from the specified byte array.
 		/// An error will be logged if deserialization fails.
+		///
+		/// Returns: The deserialized graphs
 		/// </summary>
-		public void DeserializeGraphs (byte[] bytes) {
-			var graphLock = AssertSafe();
-
-			ClearGraphs();
-			DeserializeGraphsAdditive(bytes);
-			graphLock.Release();
+		public NavGraph[] DeserializeGraphs (byte[] bytes) {
+			using (AssertSafe()) {
+				ClearGraphs();
+				return DeserializeGraphsAdditive(bytes);
+			}
 		}
 
 		/// <summary>
-		/// Deserializes graphs from the specified byte array additively.
+		/// Deserializes and loads graphs from the specified byte array additively.
 		/// An error will be logged if deserialization fails.
 		/// This function will add loaded graphs to the current ones.
+		///
+		/// Returns: The deserialized graphs
 		/// </summary>
-		public void DeserializeGraphsAdditive (byte[] bytes) {
-			var graphLock = AssertSafe();
+		public NavGraph[] DeserializeGraphsAdditive (byte[] bytes) {
+			using (AssertSafe()) {
+				try {
+					MarkerDeserializeGraphs.Begin();
+					NavGraph[] result;
+					if (bytes != null) {
+						var sr = new AstarSerializer(this, active.gameObject);
 
-			try {
-				if (bytes != null) {
-					var sr = new AstarSerializer(this, active.gameObject);
-
-					if (sr.OpenDeserialize(bytes)) {
-						DeserializeGraphsPartAdditive(sr);
-						sr.CloseDeserialize();
+						if (sr.OpenDeserialize(bytes)) {
+							result = DeserializeGraphsPartAdditive(sr);
+							sr.CloseDeserialize();
+						} else {
+							throw new System.ArgumentException("Invalid data file (cannot read zip).\nThe data is either corrupt or it was saved using a 3.0.x or earlier version of the system");
+						}
 					} else {
-						Debug.Log("Invalid data file (cannot read zip).\nThe data is either corrupt or it was saved using a 3.0.x or earlier version of the system");
+						throw new System.ArgumentNullException(nameof(bytes));
 					}
-				} else {
-					throw new System.ArgumentNullException(nameof(bytes));
+					UpdateShortcuts();
+					GraphModifier.TriggerEvent(GraphModifier.EventType.PostGraphLoad);
+					return result;
+				} catch (System.Exception e) {
+					Debug.LogError(new System.Exception("Caught exception while deserializing data.", e));
+					graphs = new NavGraph[0];
+					UpdateShortcuts();
+					throw;
+				} finally {
+					MarkerDeserializeGraphs.End();
 				}
-				active.VerifyIntegrity();
-			} catch (System.Exception e) {
-				Debug.LogError(new System.Exception("Caught exception while deserializing data.", e));
-				graphs = new NavGraph[0];
 			}
-
-			UpdateShortcuts();
-			GraphModifier.TriggerEvent(GraphModifier.EventType.PostGraphLoad);
-			graphLock.Release();
 		}
 
 		/// <summary>Helper function for deserializing graphs</summary>
-		void DeserializeGraphsPartAdditive (AstarSerializer sr) {
+		NavGraph[] DeserializeGraphsPartAdditive (AstarSerializer sr) {
 			if (graphs == null) graphs = new NavGraph[0];
 
 			var gr = new List<NavGraph>(graphs);
+
+			// Trim nulls at the end
+			while (gr.Count > 0 && gr[gr.Count-1] == null) gr.RemoveAt(gr.Count-1);
 
 			// Set an offset so that the deserializer will load
 			// the graphs with the correct graph indexes
 			sr.SetGraphIndexOffset(gr.Count);
 
 			FindGraphTypes();
-			var newGraphs = sr.DeserializeGraphs(graphTypes);
+			// This may be false if the user is editing a prefab, for example.
+			// If it is false, we must not try to load any nodes
+			bool astarInitialized = active == AstarPath.active;
+			var newGraphs = sr.DeserializeGraphs(graphTypes, astarInitialized);
 			gr.AddRange(newGraphs);
 
 			if (gr.Count > GraphNode.MaxGraphIndex + 1) {
@@ -411,9 +446,11 @@ namespace Pathfinding {
 			graphs = gr.ToArray();
 
 			// Assign correct graph indices.
+			bool anyScanned = false;
 			for (int i = 0; i < graphs.Length; i++) {
 				if (graphs[i] == null) continue;
 				graphs[i].GetNodes(node => node.GraphIndex = (uint)i);
+				anyScanned |= graphs[i].isScanned;
 			}
 
 			for (int i = 0; i < graphs.Length; i++) {
@@ -428,14 +465,24 @@ namespace Pathfinding {
 
 			sr.PostDeserialization();
 
-			// This will refresh off-mesh links,
-			// and also recalculate the hierarchical graph if necessary
-			active.AddWorkItem(ctx => {
-				for (int i = 0; i < newGraphs.Length; i++) {
-					ctx.DirtyBounds(newGraphs[i].bounds);
-				}
-			});
-			active.FlushWorkItems();
+			if (anyScanned) {
+				// This will refresh off-mesh links,
+				// and also recalculate the hierarchical graph if necessary.
+				//
+				// It's important that this does not run if no graphs are scanned,
+				// which is the case when just deserializing graph settings in the editor.
+				// This is because we may be in a prefab, and prefabs should never be able
+				// to actually load graphs with nodes.
+				active.AddWorkItem(ctx => {
+					for (int i = 0; i < newGraphs.Length; i++) {
+						if (newGraphs[i].isScanned) {
+							ctx.DirtyBounds(newGraphs[i].bounds);
+						}
+					}
+				});
+				active.FlushWorkItems();
+			}
+			return newGraphs;
 		}
 
 		#endregion
@@ -447,48 +494,13 @@ namespace Pathfinding {
 		public void FindGraphTypes () {
 			if (graphTypes != null) return;
 
+			MarkerFindGraphTypes.Begin();
 #if !ASTAR_FAST_NO_EXCEPTIONS && !UNITY_WINRT && !UNITY_WEBGL
-			var graphList = new List<System.Type>();
-			foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies()) {
-				System.Type[] types = null;
-				try {
-					types = assembly.GetTypes();
-				} catch {
-					// Ignore type load exceptions and things like that.
-					// We might not be able to read all assemblies for some reason, but hopefully the relevant types exist in the assemblies that we can read
-					continue;
-				}
-
-				foreach (var type in types) {
-#if NETFX_CORE && !UNITY_EDITOR
-					System.Type baseType = type.GetTypeInfo().BaseType;
-#else
-					var baseType = type.BaseType;
-#endif
-					while (baseType != null) {
-						if (System.Type.Equals(baseType, typeof(NavGraph))) {
-							graphList.Add(type);
-
-							break;
-						}
-
-#if NETFX_CORE && !UNITY_EDITOR
-						baseType = baseType.GetTypeInfo().BaseType;
-#else
-						baseType = baseType.BaseType;
-#endif
-					}
-				}
-			}
-
-			graphTypes = graphList.ToArray();
-
-#if ASTARDEBUG
-			Debug.Log("Found "+graphTypes.Length+" graph types");
-#endif
+			graphTypes = AssemblySearcher.FindTypesInheritingFrom<NavGraph>().ToArray();
 #else
 			graphTypes = DefaultGraphTypes;
 #endif
+			MarkerFindGraphTypes.End();
 		}
 
 		#region GraphCreation
@@ -533,34 +545,25 @@ namespace Pathfinding {
 		/// <summary>Adds the specified graph to the <see cref="graphs"/> array</summary>
 		void AddGraph (NavGraph graph) {
 			// Make sure to not interfere with pathfinding
-			var graphLock = AssertSafe(true);
+			using (AssertSafe(true)) {
+				// Try to fill in an empty position
+				int graphIndex = System.Array.IndexOf(graphs, null);
 
-			// Try to fill in an empty position
-			bool foundEmpty = false;
+				if (graphIndex == -1) {
+					if (graphs.Length >= GraphNode.MaxGraphIndex) {
+						throw new System.Exception($"Graph Count Limit Reached. You cannot have more than {GraphNode.MaxGraphIndex} graphs.");
+					}
 
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] == null) {
-					graphs[i] = graph;
-					graph.graphIndex = (uint)i;
-					foundEmpty = true;
-					break;
+					// Add a new entry
+					Memory.Realloc(ref graphs, graphs.Length + 1);
+					graphIndex = graphs.Length-1;
 				}
+				graphs[graphIndex] = graph;
+				graph.graphIndex = (uint)graphIndex;
+				graph.active = active;
+
+				UpdateShortcuts();
 			}
-
-			if (!foundEmpty) {
-				if (graphs != null && graphs.Length >= GraphNode.MaxGraphIndex) {
-					throw new System.Exception("Graph Count Limit Reached. You cannot have more than " + GraphNode.MaxGraphIndex + " graphs.");
-				}
-
-				// Add a new entry to the list
-				Memory.Realloc(ref graphs, graphs.Length + 1);
-				graphs[graphs.Length - 1] = graph;
-				graph.graphIndex = (uint)(graphs.Length-1);
-			}
-
-			UpdateShortcuts();
-			graph.active = active;
-			graphLock.Release();
 		}
 
 		/// <summary>
@@ -575,19 +578,46 @@ namespace Pathfinding {
 		/// </summary>
 		public bool RemoveGraph (NavGraph graph) {
 			// Make sure the pathfinding threads are paused
-			var graphLock = AssertSafe();
+			using (AssertSafe()) {
+				active.DirtyBounds(graph.bounds);
+				((IGraphInternals)graph).OnDestroy();
+				graph.active = null;
 
-			active.DirtyBounds(graph.bounds);
-			((IGraphInternals)graph).OnDestroy();
-			graph.active = null;
+				int i = System.Array.IndexOf(graphs, graph);
+				if (i != -1) graphs[i] = null;
+
+				UpdateShortcuts();
+				active.AddWorkItem(() => active.offMeshLinks.Refresh());
+				active.FlushWorkItems();
+				return i != -1;
+			}
+		}
+
+		/// <summary>
+		/// Duplicates the given graph and adds the duplicate to the <see cref="graphs"/> array.
+		///
+		/// Note: Only graph settings are duplicated, not the nodes in the graph. You may want to scan the graph after duplicating it.
+		///
+		/// Returns: The duplicated graph.
+		/// </summary>
+		public NavGraph DuplicateGraph (NavGraph graph) {
+			if (graph == null) throw new System.ArgumentNullException(nameof(graph));
 
 			int i = System.Array.IndexOf(graphs, graph);
-			if (i != -1) graphs[i] = null;
+			if (i == -1) throw new System.ArgumentException("Graph doesn't exist");
 
-			UpdateShortcuts();
-			active.offMeshLinks.Refresh();
-			graphLock.Release();
-			return i != -1;
+			var bytes = SerializeGraphs(SerializeSettings.Settings, out var _, new NavGraph[] { graph });
+			var newGraphs = DeserializeGraphsAdditive(bytes);
+			UnityEngine.Assertions.Assert.AreEqual(1, newGraphs.Length);
+
+#if UNITY_EDITOR
+			foreach (var g in newGraphs) {
+				var existingNames = new string[graphs.Length];
+				for (int j = 0; j < graphs.Length; j++) existingNames[j] = graphs[j].name;
+				g.name = UnityEditor.ObjectNames.GetUniqueName(existingNames, g.name);
+			}
+#endif
+			return newGraphs[0];
 		}
 
 		#endregion
@@ -595,7 +625,7 @@ namespace Pathfinding {
 		#region GraphUtility
 
 		/// <summary>
-		/// Returns the graph which contains the specified node.
+		/// Graph which contains the specified node.
 		/// The graph must be in the <see cref="graphs"/> array.
 		///
 		/// Returns: Returns the graph which contains the node. Null if the graph wasn't found
@@ -642,7 +672,7 @@ namespace Pathfinding {
 		///     //Do something with the graph
 		/// }
 		/// </code>
-		/// See: AstarPath.RegisterSafeNodeUpdate
+		/// See: <see cref="AstarPath.AddWorkItem"/>
 		/// </summary>
 		public IEnumerable FindGraphsOfType (System.Type type) {
 			if (graphs == null) yield break;
@@ -658,8 +688,8 @@ namespace Pathfinding {
 		/// <code> foreach (IUpdatableGraph graph in AstarPath.data.GetUpdateableGraphs ()) {
 		///  //Do something with the graph
 		/// } </code>
-		/// See: AstarPath.AddWorkItem
-		/// See: Pathfinding.IUpdatableGraph
+		/// See: <see cref="AstarPath.AddWorkItem"/>
+		/// See: <see cref="IUpdatableGraph"/>
 		/// </summary>
 		public IEnumerable GetUpdateableGraphs () {
 			if (graphs == null) yield break;
@@ -670,15 +700,13 @@ namespace Pathfinding {
 			}
 		}
 
-		/// <summary>Gets the index of the NavGraph in the <see cref="graphs"/> array</summary>
+		/// <summary>Gets the index of the graph in the <see cref="graphs"/> array</summary>
 		public int GetGraphIndex (NavGraph graph) {
 			if (graph == null) throw new System.ArgumentNullException("graph");
+			if (graphs == null) throw new System.ArgumentException("No graphs exist");
 
-			var index = -1;
-			if (graphs != null) {
-				index = System.Array.IndexOf(graphs, graph);
-				if (index == -1) Debug.LogError("Graph doesn't exist");
-			}
+			var index = System.Array.IndexOf(graphs, graph);
+			if (index == -1) throw new System.ArgumentException("Graph doesn't exist");
 			return index;
 		}
 

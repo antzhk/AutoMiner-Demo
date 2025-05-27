@@ -138,7 +138,7 @@ namespace Pathfinding {
 			List<Vector3> res = Apply(vs);
 
 			if (res != vs) {
-				Pathfinding.Util.ListPool<Vector3>.Release(ref p.vectorPath);
+				Pathfinding.Pooling.ListPool<Vector3>.Release(ref p.vectorPath);
 				p.vectorPath = res;
 			}
 		}
@@ -253,7 +253,7 @@ namespace Pathfinding {
 				}
 			}
 
-			List<Vector3> res = Pathfinding.Util.ListPool<Vector3>.Claim();
+			List<Vector3> res = Pathfinding.Pooling.ListPool<Vector3>.Claim();
 			res.Add(vs[0]);
 			if (detail < 1) detail = 1;
 			float step = (float)(2*Math.PI)/detail;

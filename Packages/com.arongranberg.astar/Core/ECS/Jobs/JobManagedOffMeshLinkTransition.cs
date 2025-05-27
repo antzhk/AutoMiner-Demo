@@ -9,20 +9,22 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Pathfinding.ECS {
 	using Pathfinding;
 
+	[WithOptions(EntityQueryOptions.IgnoreComponentEnabledState)] // Required so that it doesn't filter out disabled AgentOffMeshLinkMovementDisabled components. WithPresent should work, but it seems to be buggy.
 	public partial struct JobManagedOffMeshLinkTransition : IJobEntity {
 		public EntityCommandBuffer commandBuffer;
 		public float deltaTime;
 
-		public void Execute (Entity entity, ManagedState state, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, ManagedAgentOffMeshLinkTraversal managedLinkInfo) {
-			if (!MoveNext(entity, state, ref transform, ref movementPlane, ref movementControl, ref movementSettings, ref linkInfo, managedLinkInfo, deltaTime)) {
+		public void Execute (Entity entity, ManagedState state, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, ManagedAgentOffMeshLinkTraversal managedLinkInfo, EnabledRefRW<AgentOffMeshLinkMovementDisabled> movementDisabled) {
+			if (!MoveNext(entity, state, ref transform, ref movementPlane, ref movementControl, ref movementSettings, ref linkInfo, managedLinkInfo, movementDisabled, deltaTime)) {
 				commandBuffer.RemoveComponent<AgentOffMeshLinkTraversal>(entity);
 				commandBuffer.RemoveComponent<ManagedAgentOffMeshLinkTraversal>(entity);
+				commandBuffer.RemoveComponent<AgentOffMeshLinkMovementDisabled>(entity);
 			}
 		}
 
-		public static bool MoveNext (Entity entity, ManagedState state, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, ManagedAgentOffMeshLinkTraversal managedLinkInfo, float deltaTime) {
+		public static bool MoveNext (Entity entity, ManagedState state, ref LocalTransform transform, ref AgentMovementPlane movementPlane, ref MovementControl movementControl, ref MovementSettings movementSettings, ref AgentOffMeshLinkTraversal linkInfo, ManagedAgentOffMeshLinkTraversal managedLinkInfo, EnabledRefRW<AgentOffMeshLinkMovementDisabled> movementDisabled, float deltaTime) {
 			unsafe {
-				managedLinkInfo.context.SetInternalData(entity, ref transform, ref movementPlane, ref movementControl, ref movementSettings, ref linkInfo, state, deltaTime);
+				managedLinkInfo.context.SetInternalData(entity, ref transform, ref movementPlane, ref movementControl, ref movementSettings, ref linkInfo, movementDisabled, state, deltaTime);
 			}
 
 			// Initialize the coroutine during the first step.
@@ -41,6 +43,13 @@ namespace Pathfinding.ECS {
 			bool finished;
 			bool error = false;
 			bool popParts = true;
+
+			// Disable the agent's normal movement logic while traversing the off-mesh link
+			// This can be re-enabled by the state machine if it wants to, but it needs to do it every tick.
+			// It is enabled automatically by the AgentOffMeshLinkTraversal.MoveTowards method.
+			// The reference could be invalid when called from the project dawn navigation package
+			if (movementDisabled.IsValid) movementDisabled.ValueRW = true;
+
 			try {
 				finished = !managedLinkInfo.coroutine.MoveNext();
 			} catch (AgentOffMeshLinkTraversalContext.AbortOffMeshLinkTraversal) {
@@ -79,7 +88,9 @@ namespace Pathfinding.ECS {
 
 	public partial struct JobManagedOffMeshLinkTransitionCleanup : IJobEntity {
 		public void Execute (ManagedAgentOffMeshLinkTraversal managedLinkInfo) {
-			managedLinkInfo.stateMachine.OnAbortTraversingOffMeshLink();
+			// The state machine may be null if the default off-mesh link logic is used, or if the entity is destroyed on the first frame
+			// that it starts to traverse an off-mesh link.
+			if (managedLinkInfo.stateMachine != null) managedLinkInfo.stateMachine.OnAbortTraversingOffMeshLink();
 		}
 	}
 }

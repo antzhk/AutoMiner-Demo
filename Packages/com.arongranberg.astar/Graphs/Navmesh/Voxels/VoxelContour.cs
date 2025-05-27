@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Burst;
 using Pathfinding.Util;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 	/// <summary>VoxelContour used for recast graphs.</summary>

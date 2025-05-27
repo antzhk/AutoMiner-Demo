@@ -60,7 +60,12 @@
         {
             "name": "com.unity.render-pipelines.high-definition",
             "expression": "9.0",
-            "define": "MODULE_RENDER_PIPELINES_HIGH_DEFINITION_9_0_OR_NEWER"
+            "define": "MODULE_RENDER_PIPELINES_HIGH_DEFINITION_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "16.0",
+            "define": "MODULE_RENDER_PIPELINES_HIGH_DEFINITION_16_0_0_OR_NEWER"
         },
         {
             "name": "com.unity.collections",

@@ -41,7 +41,7 @@ namespace Pathfinding {
 		}
 
 		void DrawCollectionSettings (RecastGraph.CollectionSettings settings, RecastGraph.DimensionMode dimensionMode) {
-			settings.collectionMode = (RecastGraph.CollectionSettings.FilterMode)EditorGUILayout.EnumPopup("Filter objects by", settings.collectionMode);
+			settings.collectionMode = (RecastGraph.CollectionSettings.FilterMode)EditorGUILayout.EnumPopup("Filter Objects By", settings.collectionMode);
 
 			if (settings.collectionMode == RecastGraph.CollectionSettings.FilterMode.Layers) {
 				settings.layerMask = EditorGUILayoutx.LayerMaskField("Layer Mask", settings.layerMask);
@@ -73,7 +73,7 @@ namespace Pathfinding {
 			}
 
 			if (settings.rasterizeMeshes && settings.rasterizeColliders && dimensionMode == RecastGraph.DimensionMode.Dimension3D) {
-				EditorGUILayout.HelpBox("You are rasterizing both meshes and colliders. This is likely just duplicate work if the colliders and meshes are similar in shape. You can use the RecastMeshObj component" +
+				EditorGUILayout.HelpBox("You are rasterizing both meshes and colliders. This is likely just duplicate work if the colliders and meshes are similar in shape. You can use the RecastNavmeshModifier component" +
 					" to always include some specific objects regardless of what the above settings are set to.", MessageType.Info);
 			}
 		}
@@ -101,18 +101,18 @@ namespace Pathfinding {
 					var spacing = EditorGUIUtility.standardVerticalSpacing;
 					element.layer = EditorGUI.LayerField(SliceColumn(ref rect, w * 0.3f, spacing), element.layer);
 
-					if (element.mode == RecastMeshObj.Mode.WalkableSurfaceWithTag) {
-						element.mode = (RecastMeshObj.Mode)EditorGUI.EnumPopup(SliceColumn(ref rect, w * 0.4f, spacing), element.mode);
+					if (element.mode == RecastNavmeshModifier.Mode.WalkableSurfaceWithTag) {
+						element.mode = (RecastNavmeshModifier.Mode)EditorGUI.EnumPopup(SliceColumn(ref rect, w * 0.4f, spacing), element.mode);
 						element.surfaceID = Util.EditorGUILayoutHelper.TagField(rect, GUIContent.none, element.surfaceID, AstarPathEditor.EditTags);
 						element.surfaceID = Mathf.Clamp(element.surfaceID, 0, GraphNode.MaxTagIndex);
-					} else if (element.mode == RecastMeshObj.Mode.WalkableSurfaceWithSeam) {
-						element.mode = (RecastMeshObj.Mode)EditorGUI.EnumPopup(SliceColumn(ref rect, w * 0.4f, spacing), element.mode);
+					} else if (element.mode == RecastNavmeshModifier.Mode.WalkableSurfaceWithSeam) {
+						element.mode = (RecastNavmeshModifier.Mode)EditorGUI.EnumPopup(SliceColumn(ref rect, w * 0.4f, spacing), element.mode);
 						string helpTooltip = "All surfaces on this mesh will be walkable and a " +
 											 "seam will be created between the surfaces on this mesh and the surfaces on other meshes (with a different surface id)";
 						GUI.Label(SliceColumn(ref rect, 70, spacing), new GUIContent("Surface ID", helpTooltip));
 						element.surfaceID = Mathf.Max(0, EditorGUI.IntField(rect, new GUIContent("", helpTooltip), element.surfaceID));
 					} else {
-						element.mode = (RecastMeshObj.Mode)EditorGUI.EnumPopup(rect, element.mode);
+						element.mode = (RecastNavmeshModifier.Mode)EditorGUI.EnumPopup(rect, element.mode);
 					}
 
 					graph.perLayerModifications[index] = element;
@@ -187,9 +187,9 @@ namespace Pathfinding {
 			EditorGUI.BeginDisabledGroup(true);
 			var estTilesX = (estWidth + graph.editorTileSize - 1) / graph.editorTileSize;
 			var estTilesZ = (estDepth + graph.editorTileSize - 1) / graph.editorTileSize;
-			var label = estWidth.ToString() + " x " + estDepth.ToString();
+			var label = estWidth.ToString() + " x " + estDepth.ToString() + " voxels";
 			if (graph.useTiles) {
-				label += " voxels, divided into " + (estTilesX*estTilesZ) + " tiles";
+				label += ", divided into " + (estTilesX*estTilesZ) + " tiles";
 			}
 			EditorGUILayout.LabelField(new GUIContent("Size", "Based on the voxel size and the bounding box"), new GUIContent(label));
 			EditorGUI.EndDisabledGroup();
@@ -211,7 +211,7 @@ namespace Pathfinding {
 
 			if (!editor.isPrefab) {
 				if (GUILayout.Button(new GUIContent("Snap bounds to scene", "Will snap the bounds of the graph to exactly contain all meshes in the scene that matches the masks."))) {
-					graph.SnapForceBoundsToScene();
+					graph.SnapBoundsToScene();
 					GUI.changed = true;
 				}
 			}
@@ -235,7 +235,7 @@ namespace Pathfinding {
 				graph.walkableHeight = EditorGUILayout.DelayedFloatField(new GUIContent("Character Height", "Minimum distance to the roof for an area to be walkable"), graph.walkableHeight);
 				graph.walkableHeight = Mathf.Max(graph.walkableHeight, 0);
 
-				graph.walkableClimb = EditorGUILayout.FloatField(new GUIContent("Max Step Height", "How high can the character step"), graph.walkableClimb);
+				graph.walkableClimb = EditorGUILayout.FloatField(new GUIContent("Max Step Height", "How high can the character step up vertically"), graph.walkableClimb);
 
 				// A walkableClimb higher than this can cause issues when generating the navmesh since then it can in some cases
 				// Both be valid for a character to walk under an obstacle and climb up on top of it (and that cannot be handled with a navmesh without links)
@@ -254,6 +254,15 @@ namespace Pathfinding {
 			}
 
 			DrawIndentedList(perLayerModificationsList);
+
+			int seenLayers = 0;
+			for (int i = 0; i < graph.perLayerModifications.Count; i++) {
+				if ((seenLayers & 1 << graph.perLayerModifications[i].layer) != 0) {
+					EditorGUILayout.HelpBox("Duplicate layers. Each layer can only be modified by a single rule.", MessageType.Error);
+					break;
+				}
+				seenLayers |= 1 << graph.perLayerModifications[i].layer;
+			}
 
 			Separator();
 			Header("Rasterization");
@@ -283,19 +292,11 @@ namespace Pathfinding {
 
 			// This is actually a float, but to make things easier for the user, we only allow picking integers. Small changes don't matter that much anyway.
 			graph.contourMaxError = EditorGUILayout.IntSlider(new GUIContent("Edge Simplification", "Simplifies the edges of the navmesh such that it is no more than this number of voxels away from the true value.\nIn voxels."), Mathf.RoundToInt(graph.contourMaxError), 0, 5);
-			graph.minRegionSize = EditorGUILayout.FloatField(new GUIContent("Min Region Size", "Small regions will be removed. In voxels"), graph.minRegionSize);
+			graph.minRegionSize = EditorGUILayout.FloatField(new GUIContent("Min Region Size", "Small regions will be removed. In voxels. Only regions within single tiles can be removed. Regions that span multiple tiles will always be kept. If you don't use tiling, then all small regions will be removed."), graph.minRegionSize);
 
-			if (graph.collectionSettings.rasterizeColliders || (graph.dimensionMode == RecastGraph.DimensionMode.Dimension3D && graph.collectionSettings.rasterizeTerrain && graph.collectionSettings.rasterizeTrees)) {
+			var effectivelyRasterizingColliders = graph.collectionSettings.rasterizeColliders || (graph.dimensionMode == RecastGraph.DimensionMode.Dimension3D && graph.collectionSettings.rasterizeTerrain && graph.collectionSettings.rasterizeTrees) || graph.dimensionMode == RecastGraph.DimensionMode.Dimension2D;
+			if (effectivelyRasterizingColliders) {
 				DrawColliderDetail(graph.collectionSettings);
-			}
-
-			int seenLayers = 0;
-			for (int i = 0; i < graph.perLayerModifications.Count; i++) {
-				if ((seenLayers & 1 << graph.perLayerModifications[i].layer) != 0) {
-					EditorGUILayout.HelpBox("Duplicate layers. Each layer can only be modified by a single rule.", MessageType.Error);
-					break;
-				}
-				seenLayers |= 1 << graph.perLayerModifications[i].layer;
 			}
 
 			var countStillUnreadable = 0;

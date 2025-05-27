@@ -23,6 +23,9 @@ namespace Pathfinding.ECS {
 	/// Tag component to allow the agent to repair its path and recalculate various statistics.
 	///
 	/// Allows the <see cref="JobRepairPath"/> to run.
+	///
+	/// Note: <see cref="JobRepairPath"/> will, at the moment, run even if this component is not present, when manually setting some properties on the agent (e.g. ai.position, ai.destination, etc.).
+	/// Create a forum post if you have a use case which isn't supported by this.
 	/// </summary>
 	public struct SimulateMovementRepair : IComponentData {
 	}
@@ -30,7 +33,7 @@ namespace Pathfinding.ECS {
 	/// <summary>
 	/// Tag component to allow the agent to calculate how it wants to move.
 	///
-	/// Allows the <see cref="ControlJob"/> to run.
+	/// Allows the <see cref="JobControl"/> to run.
 	/// </summary>
 	public struct SimulateMovementControl : IComponentData {
 	}

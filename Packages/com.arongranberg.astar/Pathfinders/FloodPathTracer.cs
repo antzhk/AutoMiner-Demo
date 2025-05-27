@@ -1,4 +1,5 @@
 using UnityEngine;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>
@@ -115,6 +116,7 @@ namespace Pathfinding {
 		protected override void Trace (uint fromPathNodeIndex) {
 			uint pathNodeIndex = fromPathNodeIndex;
 			int count = 0;
+			GraphNode lastNode = null;
 
 			while (pathNodeIndex != 0) {
 				if ((pathNodeIndex & FloodPath.TemporaryNodeBit) != 0) {
@@ -126,12 +128,19 @@ namespace Pathfinding {
 						FailWithError("A node in the path has been destroyed. The FloodPath needs to be recalculated before you can use a FloodPathTracer.");
 						return;
 					}
-					if (!CanTraverse(node)) {
-						FailWithError("A node in the path is no longer walkable. The FloodPath needs to be recalculated before you can use a FloodPathTracer.");
-						return;
+
+					// If a node has multiple variants (like the triangle mesh node), then we may visit
+					// the same node multiple times in a sequence (but different variants of it).
+					// In the final path we don't want the duplicates.
+					if (node != lastNode) {
+						if (!CanTraverse(node)) {
+							FailWithError("A node in the path is no longer walkable. The FloodPath needs to be recalculated before you can use a FloodPathTracer.");
+							return;
+						}
+						path.Add(node);
+						lastNode = node;
+						vectorPath.Add((Vector3)node.position);
 					}
-					path.Add(node);
-					vectorPath.Add((Vector3)node.position);
 					var next = flood.GetParent(pathNodeIndex);
 					if (next == pathNodeIndex) {
 						break;

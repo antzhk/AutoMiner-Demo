@@ -5,7 +5,9 @@
         "GUID:efa45043feb7e4147a305b73b5cea642",
         "GUID:774e21169c4ac4ec8a01db9cdb98d33b",
         "GUID:f4059aaf6c60a4a58a177a2609feb769",
-        "GUID:de4e6084e6d474788bb8c799d6b461eb"
+        "GUID:de4e6084e6d474788bb8c799d6b461eb",
+        "GUID:734d92eba21c94caba915361bd5ac177",
+        "GUID:e0cd26848372d4e5c891c569017e11f1"
     ],
     "includePlatforms": [
         "Editor"
@@ -13,7 +15,9 @@
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
-    "precompiledReferences": [],
+    "precompiledReferences": [
+        "Pathfinding.Clipper2Lib.dll"
+    ],
     "autoReferenced": true,
     "defineConstraints": [
         "MODULE_BURST",
@@ -23,7 +27,7 @@
     "versionDefines": [
         {
             "name": "com.unity.burst",
-            "expression": "1.8.3",
+            "expression": "1.8.7",
             "define": "MODULE_BURST"
         },
         {
@@ -39,12 +43,37 @@
         {
             "name": "com.unity.collections",
             "expression": "0.11-preview",
-            "define": "MODULE_COLLECTIONS_0_11_OR_NEWER"
+            "define": "MODULE_COLLECTIONS_0_11_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.collections",
+            "expression": "2.0.0",
+            "define": "MODULE_COLLECTIONS_2_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.collections",
+            "expression": "2.1.0",
+            "define": "MODULE_COLLECTIONS_2_1_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.collections",
+            "expression": "2.2.0",
+            "define": "MODULE_COLLECTIONS_2_2_0_OR_NEWER"
         },
         {
             "name": "com.unity.entities",
-            "expression": "1.0.0-pre.47",
+            "expression": "1.1.0-pre.3",
             "define": "MODULE_ENTITIES"
+        },
+        {
+            "name": "com.unity.entities",
+            "expression": "1.0.8",
+            "define": "MODULE_ENTITIES_1_0_8_OR_NEWER"
+        },
+        {
+            "name": "com.unity.test-framework",
+            "expression": "2.0.0",
+            "define": "MODULE_TEST_FRAMEWORK"
         }
     ],
     "noEngineReferences": false

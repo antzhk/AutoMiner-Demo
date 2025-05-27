@@ -1,15 +1,14 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using Pathfinding.RVO;
+﻿using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
+
 
 public class Base : MonoBehaviour
 {
     [SerializeField] private string baseId;
-    
+    [SerializeField] private TextMeshProUGUI textView;
     [SerializeField] private int minerCount;
-    [SerializeField] private float minersSpeed;
+    [SerializeField] private int minersSpeed;
     [SerializeField] private string miner_key;
     
     [SerializeField] private float transferItemsDelay;
@@ -17,6 +16,7 @@ public class Base : MonoBehaviour
     [SerializeField] private SpawnerZone spawnZone;
     
     private static List<Base> allBases = new List<Base>();
+    
     private Dictionary<string, int> itemsMap = new Dictionary<string, int>();
 
     public void Awake()
@@ -43,8 +43,21 @@ public class Base : MonoBehaviour
             this.SpawnMiners(count - this.minerCount);
         }
     }
-    
-   
+
+    public void ChangeMinerSpeed(int speed)
+    {
+        foreach (var miner in Miner.GetAllBaseMiners(this.baseId))
+        {
+            miner.SetSpeed(speed);
+        }
+
+        this.minersSpeed = speed;
+    }
+
+    public int GetMinersSpeed()
+    {
+        return this.minersSpeed;
+    }
 
     public void OnDestroy()
     {
@@ -62,11 +75,18 @@ public class Base : MonoBehaviour
         {
             this.itemsMap[itemId] += itemCount;
         }
+        
+        textView.text = this.itemsMap[itemId].ToString();
     }
 
     public int GetItemsCount(string itemId)
     {
         return this.itemsMap.GetValueOrDefault(itemId, 0);
+    }
+
+    public string GetId()
+    {
+        return this.baseId;
     }
     
     public static Base GetBaseById(string id)
@@ -94,18 +114,17 @@ public class Base : MonoBehaviour
 
     private void RemoveMiners(int count)
     {
-        StartCoroutine(DelayedRemoveMiners(count));
-    }
-
-    private IEnumerator DelayedRemoveMiners(int count)
-    {
-        var toRemove = Miner.GetAllBaseMiners(this.baseId).Take(count).ToList();
-
-        foreach (var miner in toRemove)
-            miner.gameObject.SetActive(false);
-        yield return null;
-
-        foreach (var miner in toRemove)
+        var counter = 0;
+        foreach (var miner in Miner.GetAllBaseMiners(this.baseId))
+        {
             Destroy(miner.gameObject);
+            counter++;
+
+            if (counter == count)
+            {
+                this.minerCount -= count;
+                return;
+            }
+        }
     }
 }

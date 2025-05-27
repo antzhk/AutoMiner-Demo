@@ -2,8 +2,7 @@ using UnityEngine;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Collections.LowLevel.Unsafe;
-using Pathfinding.Util;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Grid.Jobs {
 	/// <summary>

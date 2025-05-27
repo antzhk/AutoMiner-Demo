@@ -113,7 +113,7 @@ namespace Pathfinding {
 
 		public override void DrawGizmos () {
 			base.DrawGizmos();
-			List<Vector3> buffer = Pathfinding.Util.ListPool<Vector3>.Claim();
+			List<Vector3> buffer = Pathfinding.Pooling.ListPool<Vector3>.Claim();
 			Vector3 endPosition = Vector3.zero;
 			CalculateOffsets(buffer, out endPosition);
 			for (int i = 0; i < buffer.Count-1; i++) {

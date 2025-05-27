@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Unity.Mathematics;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>
@@ -368,13 +369,10 @@ namespace Pathfinding {
 
 		/// <summary>Prepares the path. Searches for start and end nodes and does some simple checking if a path is at all possible</summary>
 		protected override void Prepare () {
-			//Initialize the NNConstraint
-			nnConstraint.tags = enabledTags;
-			var startNNInfo  = AstarPath.active.GetNearest(startPoint, nnConstraint);
+			var startNNInfo = GetNearest(startPoint);
 
 			//Tell the NNConstraint which node was found as the start node if it is a PathNNConstraint and not a normal NNConstraint
-			var pathNNConstraint = nnConstraint as PathNNConstraint;
-			if (pathNNConstraint != null) {
+			if (nnConstraint is PathNNConstraint pathNNConstraint) {
 				pathNNConstraint.SetStart(startNNInfo.node);
 			}
 
@@ -400,7 +398,7 @@ namespace Pathfinding {
 			// Some path types might want to use most of the ABPath code, but will not have an explicit end point at this stage
 			uint endNodeIndex = 0;
 			if (hasEndPoint) {
-				var endNNInfo = AstarPath.active.GetNearest(originalEndPoint, nnConstraint);
+				var endNNInfo = GetNearest(originalEndPoint);
 				endPoint = endNNInfo.position;
 
 				if (endNNInfo.node == null) {

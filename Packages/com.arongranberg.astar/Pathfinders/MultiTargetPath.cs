@@ -1,6 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
 using Unity.Mathematics;
 
 namespace Pathfinding {
@@ -118,14 +118,14 @@ namespace Pathfinding {
 		protected override void OnEnterPool () {
 			if (vectorPaths != null)
 				for (int i = 0; i < vectorPaths.Length; i++)
-					if (vectorPaths[i] != null) Util.ListPool<Vector3>.Release(vectorPaths[i]);
+					if (vectorPaths[i] != null) ListPool<Vector3>.Release(vectorPaths[i]);
 
 			vectorPaths = null;
 			vectorPath = null;
 
 			if (nodePaths != null)
 				for (int i = 0; i < nodePaths.Length; i++)
-					if (nodePaths[i] != null) Util.ListPool<GraphNode>.Release(nodePaths[i]);
+					if (nodePaths[i] != null) ListPool<GraphNode>.Release(nodePaths[i]);
 
 			nodePaths = null;
 			path = null;
@@ -228,6 +228,7 @@ namespace Pathfinding {
 
 		protected void RebuildOpenList () {
 			BinaryHeap heap = pathHandler.heap;
+			if (heap.tieBreaking != BinaryHeap.TieBreaking.HScore) return;
 
 			for (int i = 0; i < heap.numberOfItems; i++) {
 				var pathNodeIndex = heap.GetPathNodeIndex(i);
@@ -246,8 +247,7 @@ namespace Pathfinding {
 		}
 
 		protected override void Prepare () {
-			nnConstraint.tags = enabledTags;
-			var startNNInfo = AstarPath.active.GetNearest(startPoint, nnConstraint);
+			var startNNInfo = GetNearest(startPoint);
 			var startNode = startNNInfo.node;
 
 			if (endingCondition != null) {
@@ -289,7 +289,7 @@ namespace Pathfinding {
 
 			for (int i = 0; i < targetPoints.Length; i++) {
 				var originalTarget = targetPoints[i];
-				var endNNInfo = AstarPath.active.GetNearest(originalTarget, nnConstraint);
+				var endNNInfo = GetNearest(originalTarget);
 
 				targetNodes[i] = endNNInfo.node;
 
@@ -399,8 +399,8 @@ namespace Pathfinding {
 			Trace(pathNode);
 			vectorPaths[targetIndex] = vectorPath;
 			nodePaths[targetIndex] = path;
-			vectorPath = Util.ListPool<Vector3>.Claim();
-			path = Util.ListPool<GraphNode>.Claim();
+			vectorPath = ListPool<Vector3>.Claim();
+			path = ListPool<GraphNode>.Claim();
 
 			targetsFound[targetIndex] = true;
 			targetPathCosts[targetIndex] = gScore;
@@ -436,24 +436,7 @@ namespace Pathfinding {
 		}
 
 		protected override void Trace (uint pathNodeIndex) {
-			base.Trace(pathNodeIndex);
-
-			if (inverted) {
-				// Reverse the paths
-				int half = path.Count/2;
-
-				for (int i = 0; i < half; i++) {
-					GraphNode tmp = path[i];
-					path[i] = path[path.Count-i-1];
-					path[path.Count-i-1] = tmp;
-				}
-
-				for (int i = 0; i < half; i++) {
-					Vector3 tmp = vectorPath[i];
-					vectorPath[i] = vectorPath[vectorPath.Count-i-1];
-					vectorPath[vectorPath.Count-i-1] = tmp;
-				}
-			}
+			base.Trace(pathNodeIndex, !inverted);
 		}
 
 		protected override string DebugString (PathLog logMode) {

@@ -41,6 +41,10 @@ namespace Pathfinding {
 				);
 		}
 
+		public static bool Intersects (IntBounds a, IntBounds b) {
+			return math.all(a.min< b.max & a.max > b.min);
+		}
+
 		public IntBounds Offset (int3 offset) {
 			return new IntBounds(min + offset, max + offset);
 		}

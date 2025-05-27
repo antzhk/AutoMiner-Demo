@@ -2,7 +2,7 @@ using UnityEngine;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
-using Unity.Collections.LowLevel.Unsafe;
+using Pathfinding.Collections;
 using Unity.Mathematics;
 
 namespace Pathfinding.Util {
@@ -55,61 +55,59 @@ namespace Pathfinding.Util {
 		/// <summary>Removes duplicate vertices from the array and updates the triangle array.</summary>
 		[BurstCompile]
 		public struct JobRemoveDuplicateVertices : IJob {
-			[ReadOnly]
-			public NativeArray<Int3> vertices;
-			[ReadOnly]
-			public NativeArray<int> triangles;
-			[ReadOnly]
-			public NativeArray<int> tags;
-
-			public unsafe UnsafeAppendBuffer* outputVertices; // Element Type Int3
-			public unsafe UnsafeAppendBuffer* outputTriangles; // Element Type int
-			public unsafe UnsafeAppendBuffer* outputTags; // Element Type uint
+			public NativeList<Int3> vertices;
+			public NativeList<int> triangles;
+			public NativeList<int> tags;
 
 			public static int3 cross(int3 x, int3 y) => (x * y.yzx - x.yzx * y).yzx;
 
 			public void Execute () {
 				int numDegenerate = 0;
 				unsafe {
-					outputVertices->Reset();
-					outputTriangles->Reset();
-					outputTags->Reset();
-
 					var firstVerts = new NativeHashMapInt3Int(vertices.Length, Allocator.Temp);
 
 					// Remove duplicate vertices
 					var compressedPointers = new NativeArray<int>(vertices.Length, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
 
-					int count = 0;
+					var trianglesSpan = triangles.AsUnsafeSpan().Reinterpret<int3>(4);
+					var verticesSpan = vertices.AsUnsafeSpan();
+					var tagsSpan = tags.AsUnsafeSpan();
 
-					for (int i = 0; i < vertices.Length; i++) {
-						if (firstVerts.TryAdd(vertices[i], count)) {
-							compressedPointers[i] = count;
-							outputVertices->Add(vertices[i]);
-							count++;
+					int vertexCount = 0;
+					for (int i = 0; i < verticesSpan.length; i++) {
+						if (firstVerts.TryAdd(verticesSpan[i], vertexCount)) {
+							compressedPointers[i] = vertexCount;
+							verticesSpan[vertexCount++] = verticesSpan[i];
 						} else {
 							// There are some cases, rare but still there, that vertices are identical
 							compressedPointers[i] = firstVerts[vertices[i]];
 						}
 					}
+					vertices.Length = vertexCount;
 
-					for (int i = 0, j = 0; i < triangles.Length; i += 3, j++) {
-						var a = triangles[i+0];
-						var b = triangles[i+1];
-						var c = triangles[i+2];
+					var verticesSpanI3 = vertices.AsUnsafeSpan().Reinterpret<int3>();
+
+					uint triCount = 0;
+					for (uint ti = 0; ti < trianglesSpan.length; ti++) {
+						var tri = trianglesSpan[ti];
+						tri = new int3(compressedPointers[tri.x], compressedPointers[tri.y], compressedPointers[tri.z]);
 
 						// In some cases, users feed a navmesh graph a mesh with degenerate triangles.
 						// These are triangles with a zero area.
 						// We must remove these as they can otherwise cause issues for the JobCalculateTriangleConnections job, and they are generally just bad to include a navmesh.
 						// Note: This cross product calculation can result in overflows if the triangle is large, but since we check for equality with zero it should not be a problem in practice.
-						if (math.all(cross(vertices.ReinterpretLoad<int3>(b) - vertices.ReinterpretLoad<int3>(a), vertices.ReinterpretLoad<int3>(c) - vertices.ReinterpretLoad<int3>(a)) == 0)) {
+						if (math.all(cross(verticesSpanI3[tri.y] - verticesSpanI3[tri.x], verticesSpanI3[tri.z] - verticesSpanI3[tri.x]) == 0)) {
 							// Degenerate triangle
 							numDegenerate++;
 							continue;
 						}
-						outputTriangles->Add(new int3(compressedPointers[a], compressedPointers[b], compressedPointers[c]));
-						outputTags->Add(tags[j]);
+						trianglesSpan[triCount] = tri;
+						tagsSpan[triCount] = tagsSpan[ti];
+						triCount++;
 					}
+
+					triangles.Length = (int)triCount * 3;
+					tags.Length = (int)triCount;
 				}
 				if (numDegenerate > 0) {
 					Debug.LogWarning($"Input mesh contained {numDegenerate} degenerate triangles. These have been removed.\nA degenerate triangle is a triangle with zero area. It resembles a line or a point.");

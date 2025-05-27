@@ -124,26 +124,6 @@ namespace Pathfinding {
 		/// </summary>
 		public RVODestinationCrowdedBehavior rvoDensityBehavior = new RVODestinationCrowdedBehavior(true, 0.5f, false);
 
-		/// <summary>
-		/// Offset along the Y coordinate for the ground raycast start position.
-		/// Normally the pivot of the character is at the character's feet, but you usually want to fire the raycast
-		/// from the character's center, so this value should be half of the character's height.
-		///
-		/// A green gizmo line will be drawn upwards from the pivot point of the character to indicate where the raycast will start.
-		///
-		/// See: <see cref="gravity"/>
-		/// Deprecated: Use the <see cref="height"/> property instead (2x this value)
-		/// </summary>
-		[System.Obsolete("Use the height property instead (2x this value)")]
-		public float centerOffset {
-			get { return height * 0.5f; } set { height = value * 2; }
-		}
-
-		[SerializeField]
-		[HideInInspector]
-		[FormerlySerializedAs("centerOffset")]
-		float centerOffsetCompatibility = float.NaN;
-
 		[SerializeField]
 		[HideInInspector]
 		[UnityEngine.Serialization.FormerlySerializedAs("repathRate")]
@@ -168,17 +148,6 @@ namespace Pathfinding {
 		/// </summary>
 		[UnityEngine.Serialization.FormerlySerializedAs("rotationIn2D")]
 		public OrientationMode orientation = OrientationMode.ZAxisForward;
-
-		/// <summary>
-		/// If true, the forward axis of the character will be along the Y axis instead of the Z axis.
-		///
-		/// Deprecated: Use <see cref="orientation"/> instead
-		/// </summary>
-		[System.Obsolete("Use orientation instead")]
-		public bool rotationIn2D {
-			get { return orientation == OrientationMode.YAxisForward; }
-			set { orientation = value ? OrientationMode.YAxisForward : OrientationMode.ZAxisForward; }
-		}
 
 		/// <summary>
 		/// If true, the AI will rotate to face the movement direction.
@@ -277,8 +246,7 @@ namespace Pathfinding {
 		/// See: <see cref="canMove"/> which in contrast to this field will disable all movement calculations.
 		/// See: <see cref="updateRotation"/>
 		/// </summary>
-		[System.NonSerialized]
-		public bool updatePosition = true;
+		public bool updatePosition { get; set; } = true;
 
 		/// <summary>
 		/// Determines if the character's rotation should be coupled to the Transform's rotation.
@@ -287,8 +255,7 @@ namespace Pathfinding {
 		///
 		/// See: <see cref="updatePosition"/>
 		/// </summary>
-		[System.NonSerialized]
-		public bool updateRotation = true;
+		public bool updateRotation { get; set; } = true;
 
 		/// <summary>
 		/// Determines how the agent recalculates its path automatically.
@@ -317,37 +284,12 @@ namespace Pathfinding {
 		/// <summary>Time when the last path request was started</summary>
 		protected float lastRepath = float.NegativeInfinity;
 
-		[UnityEngine.Serialization.FormerlySerializedAs("target")][SerializeField][HideInInspector]
-		Transform targetCompatibility;
-
 		/// <summary>
 		/// True if the Start method has been executed.
 		/// Used to test if coroutines should be started in OnEnable to prevent calculating paths
 		/// in the awake stage (or rather before start on frame 0).
 		/// </summary>
 		protected bool startHasRun = false;
-
-		/// <summary>
-		/// Target to move towards.
-		/// The AI will try to follow/move towards this target.
-		/// It can be a point on the ground where the player has clicked in an RTS for example, or it can be the player object in a zombie game.
-		///
-		/// Deprecated: In 4.1 this will automatically add a <see cref="Pathfinding.AIDestinationSetter"/> component and set the target on that component.
-		/// Try instead to use the <see cref="destination"/> property which does not require a transform to be created as the target or use
-		/// the AIDestinationSetter component directly.
-		/// </summary>
-		[System.Obsolete("Use the destination property or the AIDestinationSetter component instead")]
-		public Transform target {
-			get {
-				return TryGetComponent(out AIDestinationSetter setter) ? setter.target : null;
-			}
-			set {
-				targetCompatibility = null;
-				if (!TryGetComponent(out AIDestinationSetter setter)) setter = gameObject.AddComponent<AIDestinationSetter>();
-				setter.target = value;
-				destination = value != null ? value.position : new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
-			}
-		}
 
 		/// <summary>Backing field for <see cref="destination"/></summary>
 		Vector3 destinationBackingField = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
@@ -455,7 +397,7 @@ namespace Pathfinding {
 			if (simulator != null) {
 				int agentsWithRVOControllers = 0;
 				for (int i = 0; i < count; i++) agentsWithRVOControllers += (components[i].rvoController != null && components[i].rvoController.enabled ? 1 : 0);
-				RVODestinationCrowdedBehavior.JobDensityCheck densityJobData = new RVODestinationCrowdedBehavior.JobDensityCheck(agentsWithRVOControllers, dt);
+				RVODestinationCrowdedBehavior.JobDensityCheck densityJobData = new RVODestinationCrowdedBehavior.JobDensityCheck(agentsWithRVOControllers, dt, simulator);
 
 				for (int i = 0, j = 0; i < count; i++) {
 					var agent = components[i];
@@ -464,7 +406,10 @@ namespace Pathfinding {
 						j++;
 					}
 				}
-				var densityJob = densityJobData.ScheduleBatch(agentsWithRVOControllers, agentsWithRVOControllers / 16, simulator.lastJob);
+
+				var readLock = simulator.LockSimulationDataReadOnly();
+				var densityJob = densityJobData.ScheduleBatch(agentsWithRVOControllers, agentsWithRVOControllers / 16, readLock.dependency);
+				readLock.UnlockAfter(densityJob);
 				densityJob.Complete();
 
 				for (int i = 0, j = 0; i < count; i++) {
@@ -498,7 +443,7 @@ namespace Pathfinding {
 			// If gravity is used depends on a lot of things.
 			// For example when a non-kinematic rigidbody is used then the rigidbody will apply the gravity itself
 			// Note that the gravity can contain NaN's, which is why the comparison uses !(a==b) instead of just a!=b.
-			usingGravity = !(gravity == Vector3.zero) && (!updatePosition || ((rigid == null || rigid.isKinematic) && (rigid2D == null || rigid2D.isKinematic)));
+			usingGravity = !(gravity == Vector3.zero) && (!updatePosition || ((rigid == null || rigid.isKinematic) && (rigid2D == null || rigid2D.bodyType == RigidbodyType2D.Kinematic)));
 
 			if (shouldRecalculatePath) SearchPath();
 
@@ -916,15 +861,6 @@ namespace Pathfinding {
 					canSearch = canSearchCompability;
 				}
 			}
-			if (unityThread && !float.IsNaN(centerOffsetCompatibility)) {
-				height = centerOffsetCompatibility*2;
-				ResetShape();
-				if (TryGetComponent(out RVOController rvo)) radius = rvo.radiusBackingField;
-				centerOffsetCompatibility = float.NaN;
-			}
-			#pragma warning disable 618
-			if (unityThread && targetCompatibility != null) target = targetCompatibility;
-			#pragma warning restore 618
 		}
 	}
 }

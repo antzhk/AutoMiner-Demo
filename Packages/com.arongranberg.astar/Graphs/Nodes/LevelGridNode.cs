@@ -187,16 +187,6 @@ namespace Pathfinding {
 #endif
 		}
 
-		/// <summary>
-		/// Is there a grid connection in that direction.
-		///
-		/// Deprecated: Use <see cref="HasConnectionInDirection"/> instead
-		/// </summary>
-		[System.Obsolete("Use HasConnectionInDirection instead")]
-		public bool GetConnection (int i) {
-			return ((gridConnections >> i*ConnectionStride) & ConnectionMask) != NoConnection;
-		}
-
 		public override bool HasConnectionInDirection (int direction) {
 			return ((gridConnections >> direction*ConnectionStride) & ConnectionMask) != NoConnection;
 		}

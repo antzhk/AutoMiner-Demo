@@ -2,6 +2,7 @@ using System;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
+using Pathfinding.Pooling;
 
 namespace Pathfinding.Util {
 	/// <summary>Various utilities for handling arrays and memory</summary>

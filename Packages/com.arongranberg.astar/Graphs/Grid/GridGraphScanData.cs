@@ -7,6 +7,7 @@ using UnityEngine.Profiling;
 using System.Collections.Generic;
 using Pathfinding.Jobs;
 using Pathfinding.Graphs.Grid.Jobs;
+using Pathfinding.Collections;
 using Unity.Jobs.LowLevel.Unsafe;
 
 namespace Pathfinding.Graphs.Grid {
@@ -600,7 +601,7 @@ namespace Pathfinding.Graphs.Grid {
 			var job = new JobCalculateGridConnections {
 				maxStepHeight = maxStepHeight,
 				maxStepUsesSlope = maxStepUsesSlope,
-				up = up,
+				graphToWorld = transform.matrix,
 				bounds = calculationBounds.Offset(-nodes.bounds.min),
 				arrayBounds = nodes.bounds.size,
 				neighbours = neighbours,

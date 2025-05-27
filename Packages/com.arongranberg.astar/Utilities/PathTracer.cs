@@ -8,9 +8,10 @@ using Unity.Collections;
 using Unity.Burst;
 using UnityEngine.Profiling;
 using Unity.Profiling;
-using Pathfinding.Graphs.Navmesh;
 using System.Runtime.CompilerServices;
 using Unity.Jobs.LowLevel.Unsafe;
+using Pathfinding.Collections;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>
@@ -59,6 +60,7 @@ namespace Pathfinding {
 	///      */
 	///     NativeMovementPlane movementPlane => new NativeMovementPlane(Quaternion.identity);
 	///     ABPath lastCalculatedPath;
+	///     public PathRequestSettings pathRequestSettings = PathRequestSettings.Default;
 	///
 	///     void OnEnable () {
 	///         tracer = new PathTracer(Allocator.Persistent);
@@ -85,9 +87,10 @@ namespace Pathfinding {
 	///             var parts = Funnel.SplitIntoParts(path);
 	///
 	///             // Assign the path to the PathTracer
-	///             tracer.SetPath(parts, path.path, path.originalStartPoint, path.originalEndPoint, movementPlane, path.traversalProvider, path);
+	///             tracer.SetPath(parts, path.path, path.originalStartPoint, path.originalEndPoint, movementPlane, pathRequestSettings, path);
 	///             lastCalculatedPath = path;
 	///         });
+	///         path.UseSettings(pathRequestSettings);
 	///         AstarPath.StartPath(path);
 	///     }
 	///
@@ -191,7 +194,7 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Incremented whenever the path is changed</summary>
-		public ushort version { get; private set; }
+		public ushort version { [IgnoredByDeepProfiler] get; [IgnoredByDeepProfiler] private set; }
 
 		/// <summary>True until <see cref="Dispose"/> is called</summary>
 		public readonly bool isCreated => funnelState.unwrappedPortals.IsCreated;
@@ -205,7 +208,9 @@ namespace Pathfinding {
 		/// Note: Not necessarily up to date unless <see cref="UpdateStart"/> has been called first.
 		/// </summary>
 		public GraphNode startNode {
+			[IgnoredByDeepProfiler]
 			readonly get => startNodeInternal != null && !startNodeInternal.Destroyed ? startNodeInternal : null;
+			[IgnoredByDeepProfiler]
 			private set => startNodeInternal = value;
 		}
 
@@ -216,7 +221,12 @@ namespace Pathfinding {
 		/// For performance reasons, the agent tries to avoid checking if nodes have been destroyed unless it needs to access them to calculate its movement.
 		/// Therefore, if a path is invalidated further ahead, the agent may not realize this until it has moved close enough.
 		/// </summary>
-		public readonly bool isStale => !endIsUpToDate || !startIsUpToDate || firstPartContainsDestroyedNodes;
+		public readonly bool isStale {
+			[IgnoredByDeepProfiler]
+			get {
+				return !endIsUpToDate || !startIsUpToDate || firstPartContainsDestroyedNodes;
+			}
+		}
 
 		/// <summary>
 		/// Number of parts in the path.
@@ -528,15 +538,17 @@ namespace Pathfinding {
 			var pbf = (float3)(Vector3)b;
 			var pcf = (float3)(Vector3)c;
 			var pf = (float3)p;
-			var distSq = math.lengthsq(Polygon.ClosestPointOnTriangle(paf, pbf, pcf, pf) - pf);
 			var distThreshold = height * 0.5f;
-			if (distSq >= distThreshold*distThreshold) {
+			var projectedf = ProjectOnSurface(paf, pbf, pcf, pf, movementPlane.up);
+
+			// If the agent is too far away from the surface,
+			// fall back to a more thorough check
+			if (math.lengthsq(projectedf - pf) > distThreshold*distThreshold) {
 				projected = Vector3.zero;
 				return false;
 			}
 
-			var up = movementPlane.ToWorld(float2.zero, 1);
-			projected = (Vector3)ProjectOnSurface(paf, pbf, pcf, pf, up);
+			projected = (Vector3)projectedf;
 			return true;
 		}
 
@@ -611,10 +623,10 @@ namespace Pathfinding {
 				// If so, we just project the position on the node's surface and return.
 				bool insideCurrentNode = false;
 				Vector3 newClampedPoint = Vector3.zero;
-				if (currentNode is TriangleMeshNode tnode) {
-					tnode.GetVertices(out var a, out var b, out var c);
+				if (currentNode is TriangleMeshNode triNode) {
+					triNode.GetVertices(out var a, out var b, out var c);
 					insideCurrentNode = ContainsAndProject(ref a, ref b, ref c, ref point, height, ref movementPlane, out newClampedPoint);
-				} else if (currentNode is GridNodeBase gnode) {
+				} else if (currentNode is GridNode gnode) {
 					// TODO: Can be optimized
 					// TODO: Also check for height
 					if (gnode.ContainsPoint(point)) {
@@ -712,11 +724,13 @@ namespace Pathfinding {
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		[IgnoredByDeepProfiler]
 		readonly bool ValidInPath (int absoluteNodeIndex) {
 			return HashNode(nodes.GetAbsolute(absoluteNodeIndex)) == nodeHashes.GetAbsolute(absoluteNodeIndex);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		[IgnoredByDeepProfiler]
 		static bool Valid(GraphNode node) => !node.Destroyed && node.Walkable;
 
 		/// <summary>
@@ -730,6 +744,9 @@ namespace Pathfinding {
 			int h = (int)node.NodeIndex;
 			h ^= node.Walkable ? 100663319 : 0;
 			if (node is GridNodeBase gnode) {
+				// TODO: We should hash the position of the node instead.
+				// The NodeInGridIndex will change for all nodes if a grid mover moves the graph,
+				// but we only want to invalidate the nodes which actually changed.
 				h ^= gnode.NodeInGridIndex * 25165843;
 			}
 			return h;
@@ -785,7 +802,7 @@ namespace Pathfinding {
 
 					// Filter using the traveral provider.
 					// TODO: We need to change the APIs to allow the GetNearest method to use the traversal provider
-					if (traversalProvider != null && !traversalProvider.CanTraverse(path, globallyClosestNode)) globallyClosestNode = null;
+					if (traversalProvider != null && globallyClosestNode != null && !traversalProvider.CanTraverse(path, globallyClosestNode)) globallyClosestNode = null;
 
 					startNode = globallyClosestNode;
 					if (startNode != null) {
@@ -1162,111 +1179,12 @@ namespace Pathfinding {
 			if (startNode is TriangleMeshNode) {
 				return IsInnerVertexTriangleMesh(nodes, part, portalIndex, rightSide, alternativeNodes, nnConstraint, out startIndex, out endIndex, traversalProvider, path);
 			} else if (startNode is GridNodeBase) {
-				return IsInnerVertexGrid(nodes, part, portalIndex, rightSide, alternativeNodes, nnConstraint, out startIndex, out endIndex, traversalProvider, path);
+				// Note: Code for this was removed right after #97f311079
+				throw new System.InvalidOperationException("Grid nodes are not supported. Should have been handled by the SimplifyGridInnerVertex method");
 			} else {
 				startIndex = portalIndex;
 				endIndex = portalIndex+1;
 				return false;
-			}
-		}
-
-		static bool IsInnerVertexGrid (CircularBuffer<GraphNode> nodes, Funnel.PathPart part, int portalIndex, bool rightSide, List<GraphNode> alternativeNodes, NNConstraint nnConstraint, out int startIndex, out int endIndex, ITraversalProvider traversalProvider, Path path) {
-			startIndex = portalIndex;
-			endIndex = portalIndex+1;
-			return false;
-
-			startIndex = portalIndex;
-			endIndex = portalIndex+1;
-
-			var startNode = nodes.GetAbsolute(startIndex) as GridNodeBase;
-			var endNode = nodes.GetAbsolute(endIndex) as GridNodeBase;
-
-			if (startNode == null || endNode == null || !Valid(startNode) || !Valid(endNode)) return false;
-
-			var startX = startNode.XCoordinateInGrid;
-			var startZ = startNode.ZCoordinateInGrid;
-			var dx = endNode.XCoordinateInGrid - startX;
-			var dz = endNode.ZCoordinateInGrid - startZ;
-
-			Assert.IsTrue(dx >= -1 && dx <= 1);
-			Assert.IsTrue(dz >= -1 && dz <= 1);
-
-			if (dx != 0 && dz != 0) {
-				// TODO: Handle diagonals
-				return false;
-			}
-
-
-			var dir = GridNodeBase.OffsetToConnectionDirection(dx, dz);
-			// Both of these values will be either -1 or +1.
-			var vertexDx = GridGraph.neighbourXOffsets[dir] + GridGraph.neighbourXOffsets[(dir + (rightSide ? -1 : 1) + 4) % 4];
-			var vertexDz = GridGraph.neighbourZOffsets[dir] + GridGraph.neighbourZOffsets[(dir + (rightSide ? -1 : 1) + 4) % 4];
-
-			while (startIndex > part.startIndex) {
-				var n = nodes.GetAbsolute(startIndex-1) as GridNodeBase;
-				if (n == null || !Valid(n)) break;
-
-				var x = n.XCoordinateInGrid;
-				var z = n.ZCoordinateInGrid;
-				if ((x == startX || x == startX + vertexDx) && (z == startZ || z == startZ + vertexDz)) {
-					startIndex--;
-				} else {
-					break;
-				}
-			}
-
-			while (endIndex < part.endIndex) {
-				var n = nodes.GetAbsolute(endIndex+1) as GridNodeBase;
-				if (n == null || !Valid(n)) break;
-
-				var x = n.XCoordinateInGrid;
-				var z = n.ZCoordinateInGrid;
-				if ((x == startX || x == startX + vertexDx) && (z == startZ || z == startZ + vertexDz)) {
-					endIndex++;
-				} else {
-					break;
-				}
-			}
-
-			if (endIndex <= startIndex+1) {
-				// Strange, there's a corner, but only 2 nodes that share this corner vertex.
-				Debug.LogError("Strange");
-				return false;
-			}
-
-			startNode = nodes.GetAbsolute(startIndex) as GridNodeBase;
-			endNode = nodes.GetAbsolute(endIndex) as GridNodeBase;
-
-			alternativeNodes.Add(startNode);
-
-			// The path may go around the vertex in a full loop. How silly! Let's fix that.
-			if (startNode == endNode) return true;
-
-			startX = startNode.XCoordinateInGrid;
-			startZ = startNode.ZCoordinateInGrid;
-			dx = endNode.XCoordinateInGrid - startX;
-			dz = endNode.ZCoordinateInGrid - startZ;
-			if (dx == 0 || dz == 0) {
-				// Axis-aligned connection
-				if (!startNode.ContainsOutgoingConnection(endNode)) return false;
-
-				alternativeNodes.Add(endNode);
-				return true;
-			} else {
-				// Diagonal connection.
-				// Split this into two axis-aligned connections.
-				// But they should go in the opposite direction around the vertex compared to the original
-
-				var nextDir = (GridNodeBase.OffsetToConnectionDirection(dx, dz) + (rightSide ? 0 : 1)) % 4;
-
-				var middleNode = startNode.GetNeighbourAlongDirection(nextDir);
-				if (middleNode == null) return false;
-
-				if (!middleNode.ContainsOutgoingConnection(endNode)) return false;
-
-				alternativeNodes.Add(middleNode);
-				alternativeNodes.Add(endNode);
-				return true;
 			}
 		}
 
@@ -1639,6 +1557,16 @@ namespace Pathfinding {
 			CheckInvariants();
 		}
 
+		public void RemoveAllButFirstNode (NativeMovementPlane movementPlane, ITraversalProvider traversalProvider) {
+			var pathfindingSettings = new PathRequestSettings {
+				graphMask = nnConstraint.graphMask,
+				traversableTags = nnConstraint.tags,
+				tagPenalties = null,
+				traversalProvider = traversalProvider,
+			};
+			SetFromSingleNode(startNode, startPoint, movementPlane, pathfindingSettings);
+		}
+
 		void RemoveAllPartsExceptFirst () {
 			if (partCount <= 1) return;
 			var newParts = new Funnel.PathPart[1];
@@ -1736,7 +1664,7 @@ namespace Pathfinding {
 		}
 
 		/// <summary>Replaces the current path with a single node</summary>
-		public void SetFromSingleNode (GraphNode node, Vector3 position, NativeMovementPlane movementPlane) {
+		public void SetFromSingleNode (GraphNode node, Vector3 position, NativeMovementPlane movementPlane, PathRequestSettings pathfindingSettings) {
 			SetPath(
 				new List<Funnel.PathPart> {
 				new Funnel.PathPart { startIndex = 0, endIndex = 0, startPoint = position, endPoint = position }
@@ -1745,7 +1673,7 @@ namespace Pathfinding {
 				position,
 				position,
 				movementPlane,
-				null,
+				pathfindingSettings,
 				null
 				);
 		}
@@ -1883,7 +1811,7 @@ namespace Pathfinding {
 				var ep = new int2(endCoords.x * 1024, endCoords.y * 1024) + normalizedPointEnd;
 				endNode = nodes.GetAbsolute(endNodeIndex) as GridNodeBase;
 				endCoords = endNode.CoordinatesInGrid;
-				var f = VectorMath.ClosestPointOnLineFactor(new Int2(mp.x, mp.y), new Int2(ep.x, ep.y), new Int2(endCoords.x * 1024 + 512, endCoords.y * 1024 + 512));
+				var f = VectorMath.ClosestPointOnLineFactor(new Vector2Int(mp.x, mp.y), new Vector2Int(ep.x, ep.y), new Vector2Int(endCoords.x * 1024 + 512, endCoords.y * 1024 + 512));
 				var p = new int2((int)math.lerp(mp.x, ep.x, f), (int)math.lerp(mp.y, ep.y, f)) - new int2(endCoords.x * 1024, endCoords.y * 1024);
 				normalizedPointEnd = new int2(
 					math.clamp(p.x, 0, GridGraph.FixedPrecisionScale),
@@ -1930,7 +1858,6 @@ namespace Pathfinding {
 				return false;
 			}
 		}
-
 
 		/// <summary>
 		/// Removes diagonal connections in a grid path and replaces them with two axis-aligned connections.
@@ -1997,15 +1924,15 @@ namespace Pathfinding {
 		/// <param name="movementPlane">The movement plane of the agent.</param>
 		public void SetPath (ABPath path, NativeMovementPlane movementPlane) {
 			var parts = Funnel.SplitIntoParts(path);
-			// Copy settings from the path's NNConstraint to the path tracer
-			nnConstraint.constrainTags = path.nnConstraint.constrainTags;
-			nnConstraint.tags = path.nnConstraint.tags;
-			nnConstraint.graphMask = path.nnConstraint.graphMask;
-			nnConstraint.constrainWalkability = path.nnConstraint.constrainWalkability;
-			nnConstraint.walkable = path.nnConstraint.walkable;
+			var pathfindingSettings = new PathRequestSettings {
+				graphMask = path.nnConstraint.graphMask,
+				traversableTags = path.nnConstraint.tags,
+				tagPenalties = null,
+				traversalProvider = path.traversalProvider,
+			};
 
-			SetPath(parts, path.path, path.originalStartPoint, path.originalEndPoint, movementPlane, path.traversalProvider, path);
-			Pathfinding.Util.ListPool<Funnel.PathPart>.Release(ref parts);
+			SetPath(parts, path.path, path.originalStartPoint, path.originalEndPoint, movementPlane, pathfindingSettings, path);
+			Pathfinding.Pooling.ListPool<Funnel.PathPart>.Release(ref parts);
 		}
 
 		/// <summary>Replaces the current path with the given path.</summary>
@@ -2014,9 +1941,10 @@ namespace Pathfinding {
 		/// <param name="unclampedStartPoint">The start point of the path. This is typically the start point that was passed to the path request, or the agent's current position.</param>
 		/// <param name="unclampedEndPoint">The end point of the path. This is typically the destination point that was passed to the path request.</param>
 		/// <param name="movementPlane">The movement plane of the agent.</param>
-		/// <param name="traversalProvider">The traversal provider to use for the path. Or null to use the default traversal provider.</param>
+		/// <param name="pathfindingSettings">Pathfinding settings that the path was calculated with. You may pass PathRequestSettings.Default if you don't use tags, traversal providers, or multiple graphs.</param>
 		/// <param name="path">The path to pass to the traversal provider. Or null.</param>
-		public void SetPath (List<Funnel.PathPart> parts, List<GraphNode> nodes, Vector3 unclampedStartPoint, Vector3 unclampedEndPoint, NativeMovementPlane movementPlane, ITraversalProvider traversalProvider, Path path) {
+		public void SetPath (List<Funnel.PathPart> parts, List<GraphNode> nodes, Vector3 unclampedStartPoint, Vector3 unclampedEndPoint, NativeMovementPlane movementPlane, PathRequestSettings pathfindingSettings, Path path) {
+			this.nnConstraint.UseSettings(pathfindingSettings);
 			this.startNode = nodes.Count > 0 ? nodes[0] : null;
 			partGraphType = PartGraphTypeFromNode(this.startNode);
 			this.unclampedEndPoint = unclampedEndPoint;
@@ -2035,7 +1963,7 @@ namespace Pathfinding {
 
 			if (partGraphType == PartGraphType.Grid) {
 				// SimplifyGridPath(this.parts, 0, ref this.nodes, int.MaxValue);
-				RemoveGridPathDiagonals(this.parts, 0, ref this.nodes, ref this.nodeHashes, nnConstraint, traversalProvider, path);
+				RemoveGridPathDiagonals(this.parts, 0, ref this.nodes, ref this.nodeHashes, nnConstraint, pathfindingSettings.traversalProvider, path);
 			}
 
 			SetFunnelState(this.parts[firstPartIndex]);
@@ -2043,8 +1971,8 @@ namespace Pathfinding {
 			CheckInvariants();
 			// This is necessary because the path may not have used the same distance metric that the path tracer uses.
 			// And if we don't do this, then the start/end points of the funnel may be slightly incorrect.
-			Repair(unclampedStartPoint, true, RepairQuality.Low, movementPlane, traversalProvider, path, false);
-			Repair(unclampedEndPoint, false, RepairQuality.Low, movementPlane, traversalProvider, path, false);
+			Repair(unclampedStartPoint, true, RepairQuality.Low, movementPlane, pathfindingSettings.traversalProvider, path, false);
+			Repair(unclampedEndPoint, false, RepairQuality.Low, movementPlane, pathfindingSettings.traversalProvider, path, false);
 		}
 
 		/// <summary>Returns a deep clone of this object</summary>
@@ -2052,6 +1980,7 @@ namespace Pathfinding {
 			return new PathTracer {
 					   parts = parts != null? parts.Clone() as Funnel.PathPart[] : null,
 					   nodes = nodes.Clone(),
+					   nodeHashes = nodeHashes.Clone(),
 					   portalIsNotInnerCorner = portalIsNotInnerCorner.Clone(),
 					   funnelState = funnelState.Clone(),
 					   unclampedEndPoint = unclampedEndPoint,

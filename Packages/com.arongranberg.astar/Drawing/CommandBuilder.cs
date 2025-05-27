@@ -769,8 +769,12 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// Multiply all coordinates until the next PopMatrix with the given matrix.
-		/// This differs from <see cref="PushSetMatrix"/> in that this stacks with all previously pushed matrices while <see cref="PushSetMatrix"/> does not.
+		/// Multiply all coordinates until the next <see cref="PopMatrix"/> with the given matrix.
+		///
+		/// PushMatrix and PushSetMatrix are slightly different:
+		///
+		/// - PushMatrix stacks with all previously pushed matrices. The active matrix becomes the product of the given matrix and the previously active one.
+		/// - PushSetMatrix sets the current matrix directly. The active matrix becomes the last pushed matrix.
 		/// </summary>
 		public void PushMatrix (Matrix4x4 matrix) {
 			Reserve<float4x4>();
@@ -779,8 +783,12 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// Multiply all coordinates until the next PopMatrix with the given matrix.
-		/// This differs from <see cref="PushSetMatrix"/> in that this stacks with all previously pushed matrices while <see cref="PushSetMatrix"/> does not.
+		/// Multiply all coordinates until the next <see cref="PopMatrix"/> with the given matrix.
+		///
+		/// PushMatrix and PushSetMatrix are slightly different:
+		///
+		/// - PushMatrix stacks with all previously pushed matrices. The active matrix becomes the product of the given matrix and the previously active one.
+		/// - PushSetMatrix sets the current matrix directly. The active matrix becomes the last pushed matrix.
 		/// </summary>
 		public void PushMatrix (float4x4 matrix) {
 			Reserve<float4x4>();
@@ -789,8 +797,12 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>
-		/// Multiply all coordinates until the next PopMatrix with the given matrix.
-		/// This differs from <see cref="PushMatrix"/> in that this sets the current matrix directly while <see cref="PushMatrix"/> stacks with all previously pushed matrices.
+		/// Multiply all coordinates until the next <see cref="PopMatrix"/> with the given matrix.
+		///
+		/// PushMatrix and PushSetMatrix are slightly different:
+		///
+		/// - PushMatrix stacks with all previously pushed matrices. The active matrix becomes the product of the given matrix and the previously active one.
+		/// - PushSetMatrix sets the current matrix directly. The active matrix becomes the last pushed matrix.
 		/// </summary>
 		public void PushSetMatrix (Matrix4x4 matrix) {
 			Reserve<float4x4>();
@@ -800,7 +812,11 @@ namespace Pathfinding.Drawing {
 
 		/// <summary>
 		/// Multiply all coordinates until the next PopMatrix with the given matrix.
-		/// This differs from <see cref="PushMatrix"/> in that this sets the current matrix directly while <see cref="PushMatrix"/> stacks with all previously pushed matrices.
+		///
+		/// PushMatrix and PushSetMatrix are slightly different:
+		///
+		/// - PushMatrix stacks with all previously pushed matrices. The active matrix becomes the product of the given matrix and the previously active one.
+		/// - PushSetMatrix sets the current matrix directly. The active matrix becomes the last pushed matrix.
 		/// </summary>
 		public void PushSetMatrix (float4x4 matrix) {
 			Reserve<float4x4>();
@@ -808,7 +824,12 @@ namespace Pathfinding.Drawing {
 			Add(matrix);
 		}
 
-		/// <summary>Pops a matrix from the stack</summary>
+		/// <summary>
+		/// Pops a matrix from the stack.
+		///
+		/// See: <see cref="PushMatrix"/>
+		/// See: <see cref="PushSetMatrix"/>
+		/// </summary>
 		public void PopMatrix () {
 			Reserve(4);
 			Add(Command.PopMatrix);
@@ -1499,7 +1520,7 @@ namespace Pathfinding.Drawing {
 		}
 
 		/// <summary>Determines the symbol to use for <see cref="PolylineWithSymbol"/></summary>
-		public enum SymbolDecoration {
+		public enum SymbolDecoration : byte {
 			/// <summary>
 			/// No symbol.
 			///
@@ -1611,20 +1632,43 @@ namespace Pathfinding.Drawing {
 			float3 prev;
 			float offset;
 			readonly float symbolSize;
-			readonly float symbolSpacing;
+			readonly float connectingSegmentLength;
 			readonly float symbolPadding;
 			readonly float symbolOffset;
-			readonly SymbolDecoration symbol;
-			readonly bool reverseSymbols;
-			bool odd;
 
-			/// <summary>Create a new polyline with symbol generator.</summary>
+			/// <summary>
+			/// The up direction of the symbols.
+			///
+			/// This is used to determine the orientation of the symbols.
+			/// By default this is set to (0,1,0).
+			/// </summary>
+			public float3 up;
+
+			readonly SymbolDecoration symbol;
+			State state;
+			readonly bool reverseSymbols;
+
+			enum State : byte {
+				NotStarted,
+				ConnectingSegment,
+				PreSymbolPadding,
+				Symbol,
+				PostSymbolPadding,
+			}
+
+			/// <summary>
+			/// Create a new polyline with symbol generator.
+			///
+			/// Note: If symbolSize + 2*symbolPadding > symbolSpacing, the symbolSpacing parameter will be increased to accommodate the symbol and its padding.
+			/// There will be no connecting lines between the symbols in this case, as there's no space for them.
+			/// </summary>
 			/// <param name="symbol">The symbol to use</param>
 			/// <param name="symbolSize">The size of the symbol. In case of a circle, this is the diameter.</param>
 			/// <param name="symbolPadding">The padding on both sides of the symbol between the symbol and the line.</param>
 			/// <param name="symbolSpacing">The spacing between symbols. This is the distance between the centers of the symbols.</param>
 			/// <param name="reverseSymbols">If true, the symbols will be reversed. For cicles this has no effect, but arrowhead symbols will be reversed.</param>
-			public PolylineWithSymbol(SymbolDecoration symbol, float symbolSize, float symbolPadding, float symbolSpacing, bool reverseSymbols = false) {
+			/// <param name="offset">Distance to shift all symbols forward along the line. Useful for animations. If offset=0, the first symbol's center is at symbolSpacing/2.</param>
+			public PolylineWithSymbol(SymbolDecoration symbol, float symbolSize, float symbolPadding, float symbolSpacing, bool reverseSymbols = false, float offset = 0) {
 				if (symbolSpacing <= math.FLT_MIN_NORMAL) throw new System.ArgumentOutOfRangeException(nameof(symbolSpacing), "Symbol spacing must be greater than zero");
 				if (symbolSize <= math.FLT_MIN_NORMAL) throw new System.ArgumentOutOfRangeException(nameof(symbolSize), "Symbol size must be greater than zero");
 				if (symbolPadding < 0) throw new System.ArgumentOutOfRangeException(nameof(symbolPadding), "Symbol padding must non-negative");
@@ -1633,15 +1677,20 @@ namespace Pathfinding.Drawing {
 				this.symbol = symbol;
 				this.symbolSize = symbolSize;
 				this.symbolPadding = symbolPadding;
-				this.symbolSpacing = math.max(0, symbolSpacing - symbolPadding * 2f - symbolSize);
+				this.connectingSegmentLength = math.max(0, symbolSpacing - symbolPadding * 2f - symbolSize);
+				// Calculate actual value, after clamping to a valid range
+				symbolSpacing = symbolPadding * 2 + symbolSize + connectingSegmentLength;
 				this.reverseSymbols = reverseSymbols;
+				this.up = new float3(0, 1, 0);
 				symbolOffset = symbol == SymbolDecoration.ArrowHead ? -0.25f * symbolSize : 0;
 				if (reverseSymbols) {
 					symbolOffset = -symbolOffset;
 				}
 				symbolOffset += 0.5f * symbolSize;
-				offset = -1;
-				odd = false;
+				this.offset = (this.connectingSegmentLength * 0.5f + offset) % symbolSpacing;
+				// Ensure the initial offset is always negative. This makes the state machine start in the correct state when the offset turns positive.
+				if (this.offset > 0) this.offset -= symbolSpacing;
+				this.state = State.NotStarted;
 			}
 
 			/// <summary>
@@ -1652,48 +1701,77 @@ namespace Pathfinding.Drawing {
 			/// <param name="draw">The command builder to draw to. You can use a built-in builder like \reflink{Draw.editor} or \reflink{Draw.ingame}, or use a custom one.</param>
 			/// <param name="next">The next point in the polyline to move to.</param>
 			public void MoveTo (ref CommandBuilder draw, float3 next) {
-				if (offset == -1) {
-					offset = this.symbolSpacing * 0.5f;
+				if (state == State.NotStarted) {
 					prev = next;
+					state = State.ConnectingSegment;
 					return;
 				}
+
 				var len = math.length(next - prev);
 				var invLen = math.rcp(len);
 				var dir = next - prev;
 				float3 up = default;
 				if (symbol != SymbolDecoration.None) {
-					up = math.normalizesafe(math.cross(dir, math.cross(dir, new float3(0, 1, 0))));
+					up = math.normalizesafe(math.cross(dir, math.cross(dir, this.up)));
 					if (math.all(up == 0f)) {
 						up = new float3(0, 0, 1);
 					}
+					if (reverseSymbols) dir = -dir;
 				}
-				if (reverseSymbols) dir = -dir;
-				if (offset > 0 && !odd) {
-					draw.Line(prev, math.lerp(prev, next, math.min(offset * invLen, 1)));
-				}
-				while (offset < len) {
-					if (odd) {
-						var pLast = math.lerp(prev, next, offset * invLen);
-						offset += symbolSpacing;
-						var p = math.lerp(prev, next, math.min(offset * invLen, 1));
-						draw.Line(pLast, p);
-						offset += symbolPadding;
-					} else {
-						var p = math.lerp(prev, next, (offset + symbolOffset) * invLen);
-						switch (symbol) {
-						case SymbolDecoration.None:
-							break;
-						case SymbolDecoration.ArrowHead:
-							draw.Arrowhead(p, dir, up, symbolSize);
-							break;
-						case SymbolDecoration.Circle:
-						default:
-							draw.Circle(p, up, symbolSize * 0.5f);
+
+				var currentPositionOnSegment = 0f;
+				while (true) {
+					if (state == State.ConnectingSegment) {
+						if (offset >= 0 && offset != currentPositionOnSegment) {
+							currentPositionOnSegment = math.max(0, currentPositionOnSegment);
+							var pLast = math.lerp(prev, next, currentPositionOnSegment * invLen);
+							var p = math.lerp(prev, next, math.min(offset * invLen, 1));
+							draw.Line(pLast, p);
+						}
+
+						if (offset < len) {
+							state = State.PreSymbolPadding;
+							currentPositionOnSegment = offset;
+							offset += symbolPadding;
+						} else {
 							break;
 						}
-						offset += symbolSize + symbolPadding;
+					} else if (state == State.PreSymbolPadding) {
+						if (offset >= len) break;
+
+						state = State.Symbol;
+						currentPositionOnSegment = offset;
+						offset += symbolOffset;
+					} else if (state == State.Symbol) {
+						if (offset >= len) break;
+
+						if (offset >= 0) {
+							var p = math.lerp(prev, next, offset * invLen);
+							switch (symbol) {
+							case SymbolDecoration.None:
+								break;
+							case SymbolDecoration.ArrowHead:
+								draw.Arrowhead(p, dir, up, symbolSize);
+								break;
+							case SymbolDecoration.Circle:
+							default:
+								draw.Circle(p, up, symbolSize * 0.5f);
+								break;
+							}
+						}
+
+						state = State.PostSymbolPadding;
+						currentPositionOnSegment = offset;
+						offset += -symbolOffset + symbolSize + symbolPadding;
+					} else if (state == State.PostSymbolPadding) {
+						if (offset >= len) break;
+
+						state = State.ConnectingSegment;
+						currentPositionOnSegment = offset;
+						offset += connectingSegmentLength;
+					} else {
+						throw new System.Exception("Invalid state");
 					}
-					odd = !odd;
 				}
 				offset -= len;
 				prev = next;
@@ -1806,6 +1884,9 @@ namespace Pathfinding.Drawing {
 
 			[BurstCompile]
 			public static unsafe void WireMesh (float3* verts, int* indices, int vertexCount, int indexCount, ref CommandBuilder draw) {
+				if (indexCount % 3 != 0) {
+					throw new System.ArgumentException("Invalid index count. Must be a multiple of 3");
+				}
 				// Ignore warning about NativeHashMap being obsolete in early versions of the collections package.
 				// It works just fine, and in later versions the NativeHashMap is not obsolete.
 				#pragma warning disable 618
@@ -2734,17 +2815,10 @@ namespace Pathfinding.Drawing {
 		/// <param name="alignment">How to align the text relative to the given position.</param>
 		public void Label3D (float3 position, quaternion rotation, string text, float size, LabelAlignment alignment) {
 			AssertBufferExists();
-			var g = gizmos.Target as DrawingData;
 			Reserve<TextData3D>();
 			Add(Command.Text3D);
 			Add(new TextData3D { center = position, rotation = rotation, numCharacters = text.Length, size = size, alignment = alignment });
-
-			Reserve(UnsafeUtility.SizeOf<System.UInt16>() * text.Length);
-			for (int i = 0; i < text.Length; i++) {
-				char c = text[i];
-				System.UInt16 index = (System.UInt16)g.fontData.GetIndex(c);
-				Add(index);
-			}
+			AddText(text);
 		}
 
 		/// <summary>
@@ -2788,11 +2862,14 @@ namespace Pathfinding.Drawing {
 		/// <param name="alignment">How to align the text relative to the given position.</param>
 		public void Label2D (float3 position, string text, float sizeInPixels, LabelAlignment alignment) {
 			AssertBufferExists();
-			var g = gizmos.Target as DrawingData;
 			Reserve<TextData>();
 			Add(Command.Text);
 			Add(new TextData { center = position, numCharacters = text.Length, sizeInPixels = sizeInPixels, alignment = alignment });
+			AddText(text);
+		}
 
+		void AddText (string text) {
+			var g = gizmos.Target as DrawingData;
 			Reserve(UnsafeUtility.SizeOf<System.UInt16>() * text.Length);
 			for (int i = 0; i < text.Length; i++) {
 				char c = text[i];

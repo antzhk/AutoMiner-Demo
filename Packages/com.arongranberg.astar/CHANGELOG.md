@@ -1,3 +1,224 @@
+## 5.3.3 (2025-01-31)
+- Fixed scanning grid graphs in Unity 6000.0.36f1+ would throw an exception, due to changes to unity's job system.
+
+## 5.3.2 (2025-01-27)
+- Fixed compatibility with com.unity.entities version 1.3.9 (latest version at the time of this update).
+- Fixed an out of range exception that could happen when using local avoidance and the latest burst package was installed (it was optimizing away my error checking!).
+- Fixed a rare edge case that could cause the \reflink{FunnelModifier} on the High setting to produce a weird looking path that included some backtracking.
+- Fixed an exception could be thrown when cameras were rendered without a color target.
+- Fixed a race condition that could in rare cases cause an exception to be thrown from \reflink{FollowerEntity.SearchPath}.
+- Fixed scanning grid graphs with invalid settings could throw an exception.
+- \reflink{GridGraph.SetDimensions} will now throw an exception if the given width, depth or node size is less than or equal to zero.
+- \reflink{MovementState.hierarchicalNodeIndex} and \reflink{MovementControl.hierarchicalNodeIndex} are now set to -1 at the end of the \reflink{AIMovementSystemGroup} to prevent accidental use of stale data.
+- Fixed the \reflink{FollowerEntity} would sometimes still use gravity during traversal of off-mesh links, even if the built-in movement was disabled.
+- Fixed a memory leak that could sometimes happen when calling \reflink{FollowerEntity.GetRemainingPath}.
+
+## 5.3.1 (2025-01-13)
+- Fixed a regression in 5.3.0 causing navmesh cutting to be much slower than it should be.
+- Fixed triangle nodes on recast/navmesh graphs with no adjacent triangles would not be able to be traversed via off-mesh links.
+- Fixed triangle nodes on recast/navmesh graphs with no adjacent triangles would not be detected by the \reflink{ConstantPath} path type.
+- Fixed some missing videos in the \ref get-started-recast tutorial.
+
+## 5.3.0 (2025-01-09)
+- Added a new get started video:
+		\youtube{PZXX4xGzCCA}
+- Rewrote the \ref getstarted to make it easier to follow, and more up-to-date.
+- Added a new tutorial: \ref get-started-grid.
+- Added a new tutorial: \ref get-started-point.
+- Added a new tutorial: \ref get-started-recast.
+- Added a lightbox to all images in the documentation.
+- Various other documentation improvements.
+- Fixed enabling \reflink{FollowerEntity.isStopped} would make the agent resist being rotated by other means.
+- Fixed \reflink{FollowerEntity} could vibrate a lot when being dragged outside the navmesh.
+- The \reflink{FollowerEntity} control loop now always runs at least once per frame, instead of skipping some frames if the fps was very high.
+- Fixed a bug causing paths calculating using the Manhattan or None heuristics on grid graphs to look much worse than they should (regression in 5.0).
+		The paths were still optimal, but they were not as straight as they should have been.
+- Fixed compilation errors when the "com.danielmansson.mathematics.fixedpoint" package was installed in the same project.
+- Fixed some edge cases where navmesh cuts on recast graphs could break connections between adjacent tiles.
+- The \reflink{FollowerEntity} component now defaults to drawing its path in the scene view. This can be disabled in the inspector, or by changing \reflink{FollowerEntity.debugFlags}.
+- Fixed the \reflink{RuleTexture} on grid graphs would not necessarily realize if its texture reference had changed.
+- The \reflink{RecastGraph} now defaults to a voxel size of 0.25, instead of 0.5.
+		The default character radius was reduced a few versions ago, but the voxel size was not updated to match (it's recommended to keep the voxel size to at most half the character radius).
+- Fixed the layer mask for the recast graph would be used even if the graph was set to filter by tags, not by layers.
+- Fixed navmesh cuts could, in very degenerate cases, throw an exception due to an incorrect comparator.
+- Fixed some edge cases where linecasts on recast/navmesh graphs could return that an obstacle existed if the end point of the linecast was exactly on the border between two nodes.
+- Fixed an edge case when adding nodes to a point graph that could result in an exception being thrown.
+- Local avoidance agents in layers that an agent does not try to avoid, no longer count towards the "Max Neighbours" limit.
+- The FollowerEntity is will now use exponential back off if its path calculations continue to fail. Previously it would try to recalculate its path as quickly as possible in this case,
+	   but now it will recalculate its path more slowly to improve performance.
+
+## 5.2.5 (2024-11-20)
+- Breaking changes
+		- If you have built your own ECS baker for the FollowerEntity. You must now also add the \reflink{PhysicsSceneRef} component to the entity.
+- When the \reflink{FollowerEntity} traverses off-mesh links and custom off mesh link handling code is used, it will no longer enable the agent's built-in movement by default.
+		Instead it will only be enabled if \reflink{AgentOffMeshLinkTraversalContext.enableBuiltInMovement} is enabled or \reflink{AgentOffMeshLinkTraversalContext.MoveTowards} is called.
+		This resolves issues many users have had where the agent's built-in movement was interefering with animation-driven movement during off-mesh links.
+- Fixed navmesh cutting could throw an exception due to a multithreading race condition, if navmesh cutting was used and multiple regular graph updates were happening at the same time (regression in 5.2.0).
+- Improved performance of \reflink{FollowerEntity} slightly.
+- Fixed the inspector for \reflink{RulePerLayerModifications} would not properly show the tag dropdown (possibly only an issue in Unity 6).
+- \reflink{RecastGraph.SnapBoundsToScene} will now make the bounding box taller to ensure the agent can stand on every valid surface.
+- The \reflink{FollowerEntity} will now use the physics scene from its GameObject when performing raycasts. Previously it always used the default physics scene.
+		This is useful when, for example, you use Unity's multiplayer testing mode, which creates multiple players in the same unity editor instance, each with their own physics scene.
+- \reflink{RecastGraph}s now default to rasterizing colliders, instead of meshes. This has slightly better performance, and is a better choice for most games.
+- Improved performance when deep profiling is enabled.
+- Increased the minimum supported version of the (optional) entities package to 1.1.0 (up from 1.0.0).
+
+## 5.2.4 (2024-10-14)
+- Fixed trying to use navmesh cutting with an older version of the Unity collections package could throw an exception, instead of logging an error message saying that this is unsupported.
+- Fixed an exception that could happen when setting FollowerEntity.movementPlaneSource to NavmeshNormal and the agent lost the path it was following.
+- Fixed using the \reflink{NavmeshAdd} component could cause Unity to crash (regression in 5.2.0).
+- Fixed incompatibility with the high definition render pipeline accidentally introduced in 5.2.3.
+- Fixed the \reflink{FollowerEntity} component throwing an exception if it was opened in prefab isolation mode while the game was running.
+- Fixed \reflink{NavmeshAdd.ForceUpdate} throwing an exception if there was no \reflink{AstarPath} component in the scene.
+- Fixed gizmos were not rendered when opening prefab assets in isolation mode and the high definition render pipeline was used.
+- Fixed a memory leak when the AstarPath component was put in a prefab.
+- Fixed an exception that could happen if one tried to load a graph from a zip file that contained nodes (not just settings) into an AstarPath component on a prefab.
+
+## 5.2.3 (2024-10-07)
+- Fixed point graphs could in rare cases get stuck in an infinite loop when scanning.
+
+## 5.2.2 (2024-10-05)
+- \a Please \a delete \a your \a previous \a installation \a before \a upgrading.
+- Fixed standalone builds would fail for some platforms and configuration options (regression in 5.2.0).
+- Fixed changing the gravity setting on the \reflink{FollowerEntity} component during runtime would not affect anything.
+- Changed \reflink{FollowerEntity.enableGravity} to have no effect if the agent's orientation is set to YAxisForward (2D mode).
+		Gravity does not really make sense for top-down 2D games. The gravity setting is also hidden from the inspector in this mode.
+
+## 5.2.1 (2024-10-03)
+- Fixed upgrading to 5.2.0 from an older version could result in compilation errors. UnityPackages are truly terrible.
+- Fixed a few edge cases with navmesh cutting (regression in 5.2.0).
+- Improved navmesh simplification when using navmesh cutting.
+
+## 5.2.0 (2024-10-01)
+- Breaking changes
+		- Renamed RecastMeshObj to \reflink{RecastNavmeshModifier}.
+			An interface has been provided to handle backwards compatibility for most cases, but there are some cases where manual script changes are required (a search and replace will do it).
+		- Renamed DynamicGridObstacle to \reflink{DynamicObstacle}, because it supports recast graphs too, since a while back.
+			An interface has been provided to handle backwards compatibility for most cases, but there are some cases where manual script changes are required (a search and replace will do it).
+		- The \reflink{NavmeshCut} component now requires Unity 2022.3 or newer to use, due to Unity bugs in earlier versions.
+		- The \reflink{NavmeshCut} component now requires com.unity.collections version 2.2.0 or newer to use.
+		- Moved \reflink{ListPool}, \reflink{ArrayPool} and \reflink{PathPool} to a new namespace Pathfinding.Pooling.
+		- Removed all usages of the custom Int2 struct, and replaced them with Unity's equivalent Vector2Int struct.
+- Improvements and new features
+		- Significantly improved robustness of navmesh cutting.
+			Previously, if navmesh cuts were placed in just the right way, the cutting could fail and the navmesh would not be updated correctly.
+			This was rare, but if the game allowed user-placed navmesh cuts, it was bound to happen eventually.
+		- Reduced GC allocations during navmesh cutting by up to 85%.
+		- Improved performance of navmesh cutting by about 25%.
+		- Navmesh cutting now works outside play mode too.
+		- Added \reflink{AstarPath.Linecast}, which is a convenience method for checking if there is line-of-sight between two points.
+			This will delegate the check to the most reasonable graph.
+		- Added a tutorial on linecasting: \ref linecasting.
+			\video{generated/scenes/Linecasting/linecast.webm}
+		- Added a tutorial on how to add and remove nodes from a point graph: \ref creating-point-nodes.
+		- Added \reflink{FollowerEntity.CreateEntity}. A static function to create an entity without using the FollowerEntity MonoBehaviour itself.
+		- Added \reflink{NavGraph.RandomPointOnSurface} to get a random point on the surface of a graph, optionally filtered by a \reflink{NNConstraint}.
+		- Nodes in point graphs can now be removed using \reflink{PointGraph.RemoveNode}. Previously it was only possible to add nodes.
+		- Point graphs will now draw a box around each node in the scene view, even for nodes that have been added using a script.
+		- It's now possible to duplicate graphs in the inspector.
+		- Improved styling of graph edit icons in the inspector:
+			\shadowimage{changelog/edit_icon2.png}
+		- Added \reflink{AstarData.DuplicateGraph}.
+		- Updated various screenshots in the documentation to be more up to date, and in HiDPI, so they look great on retina displays too.
+		- \reflink{FollowerEntity.velocity} can now be assigned to.
+		- Added \reflink{IAstarAI.updatePosition} and \reflink{IAstarAI.updateRotation}. These properties have existed on all movement scripts, but they were not added to the interface before.
+		- Reduced GC allocations and improved performance slightly, when loading a sequence of scenes that contain the \reflink{AstarPath} component.
+- Fixes
+		- Fixed \reflink{ManagedState.Clone} would throw an exception if its PathTracer was not initialized.
+		- Fixed \reflink{SingleNodeBlocker.Block} would not unblock the previously blocked node (in contrast to what the documentation said, and different from what the BlockAt method did).
+		- Fixed layered grid graphs could in rare cases generate one-way connections between nodes, when \reflink{GridGraph.maxStepUsesSlope} was enabled.
+		- Fixed the graph display window in the scene view would be rendered off-screen on HiDPI displays.
+		- Fixed the \reflink{GraphUpdateScene} shortcuts help window in the scene view would be rendered off-screen on HiDPI displays.
+		- Fixed \reflink{FollowerEntity.SearchPath} would not take into account any custom pathfinding settings set on the \reflink{FollowerEntity} component.
+		- Fixed undo events could in some situations reset pathfinding settings on the \reflink{FollowerEntity} component.
+		- Fixed calling \reflink{FollowerEntity.GetRemainingPath} could throw an exception if the path contained off-mesh links (recent regression).
+		- Fixed having \reflink{FollowerEntity.isStopped} enabled when a FollowerEntity component was enabled, could cause its rotation to be reset.
+		- Fixed the \reflink{FollowerEntity} could attach itself to a graph that did not match its graph mask, for a few frames, until its first path was calculated.
+		- Fixed updating a layered grid graph and forcing nodes to be walkable, could, in some cases, create connections to nodes that didn't exist, causing errors later on.
+		- Reduced "shyness" around locked local avoidance agents close to the end of an agent's path.
+		- Fixed the heuristic optimization subsystem could throw an exception in some cases if all graphs were empty.
+		- Fixed scanning a recast graph with very tiny \reflink{RecastNavmeshModifier} components could in exceedingly rare cases freeze Unity.
+		- Fixed the \ref writing-graph-generators tutorial created node connections incorrectly (regression in 5.0).
+		- Fixed one overload of NavmeshBase.Linecast would ignore the \a hint parameter.
+		- Worked around a Unity bug which could cause the welcome screen to throw an exception.
+- Changes
+		- Removed obsolete script MineBotAI. It has been deprecated for around 7 years and has been replaced by AIPath together with MineBotAnimation.
+		- Removed the experimental warning for the \reflink{FollowerEntity} component.
+		- \reflink{RecastGraph.characterRadius} now defaults to 0.5, instead of 1.5. This is a more reasonable default for most humanoid characters.
+		- Split out the \reflink{RepairPathSystem} from the \reflink{FollowerControlSystem}.
+		- Added the DisallowMultipleComponent attribute to the AstarPath component, and all built-in movement scripts.
+		- Renamed AstarData.navmesh to \reflink{AstarData.navmeshGraph} for consistency.
+		- \reflink{NavGraph.RelocateNodes} will now verify that it is safe to update nodes. It's safe to update nodes in a work item, or during a graph update.
+		- Moved various internal classes to a new namespace Pathfinding.Collections.
+		- Moved various internal classes to a new namespace Pathfinding.Sync.
+		- Moved \reflink{ListPool}, \reflink{ArrayPool} and \reflink{PathPool} to a new namespace Pathfinding.Pooling.
+		- Removed AIBase.centerOffset, as it's been deprecated for 6 years.
+		- Removed AIBase.rotationIn2D, as it's been deprecated for 6 years. Use \reflink{AIBase.orientation} instead.
+		- Removed AILerp.rotationIn2D, as it's been deprecated for 6 years. Use \reflink{AILerp.orientation} instead.
+		- Removed AIBase.target, as it's been deprecated for 7 years. Use the \reflink{AIDestinationSetter} component instead.
+		- Removed AILerp.target, as it's been deprecated for 7 years. Use the \reflink{AIDestinationSetter} component instead.
+		- Removed AILerp.ForceSearchPath, as it's been deprecated for 7 years. Use \reflink{AILerp.SearchPath} instead.
+		- Removed GridNode.GetConnectionInternal, as it's been deprecated for 8 years. Use \reflink{GridNode.HasConnectionInDirection} instead.
+		- Removed LevelGridNode.HasConnection, as it's been deprecated for 8 years. Use \reflink{LevelGridNode.HasConnectionInDirection} instead.
+		- Removed RVOController.mask, as it's been deprecated for 7 years. Use settings on your movement script instead.
+		- Removed RVOController.enableRotation, as it's been deprecated for 7 years. Use settings on your movement script instead.
+		- Removed RVOController.rotationSpeed, as it's been deprecated for 7 years. Use settings on your movement script instead.
+		- Removed RVOController.maxSpeed, as it's been deprecated for 7 years. Use settings on your movement script instead.
+		- Removed RVOController.ForceSetVelocity, as it's been deprecated for 7 years. Use \reflink{RVOController.velocity} instead.
+		- Removed RVOController.Teleport, as it's been deprecated for 8 years. It is no longer necessary.
+
+## 5.1.6 (2024-08-06)
+- Fixed compatibility with com.unity.mathematics 1.3.0 and lower.
+
+## 5.1.5 (2024-08-06)
+- If an async scan is running when the AstarPath component is disabled, or another scan is started, then the code will block until the in-progress async scan has finished.
+		Previously, unloading a scene while an async scan was running could in some cases lead to memory leaks and exceptions.
+- Fixed \reflink{FollowerEntity} could get teleported a small distance in 2D games, right when the game started.
+- Fixed \reflink{PointGraph.GetNearest} could throw an exception in some situations if there was no acceptable node nearby.
+- Fixed \reflink{GridGraph.RelocateNodes} could leave the grid graph with a corrupted state.
+- Fixed updating point graphs could throw an exception if some nodes had been manually added to the graph.
+- Fixed some compilation warnings in Unity 6.
+- Fixed \reflink{FollowerEntity.updateRotation} and \reflink{FollowerEntity.updatePosition} would not always take effect when set from the unity inspector.
+- Fixed \reflink{AstarPath.showSearchTree} could show incorrect information on recast graphs.
+- Fixed \reflink{FloodPathTracer} not working with recast graphs (regression in 5.0).
+- Fixed using graph coloring modes G, H or F on recast graphs could display incorrect information.
+- Fixed toggling \reflink{AstarPath.showSearchTree} would not always re-render the graph visualization.
+- Fixed an \reflink{ITraversalProvider} on a \reflink{FollowerEntity} could be called with a null node in some cases.
+- Fixed tons of grammar and spelling mistakes in the documentation.
+- Fixed Seeker.StartMultiTargetPath would never use the Seeker's graphMask.
+- Fixed calling \reflink{AstarPath.FlushWorkItems} would freeze unity if a work item threw an exception.
+- \reflink{AstarData.DeserializeGraphsAdditive} now returns an array with the deserialized graphs.
+- Trying to deserialize graphs from an invalid zip file will now throw an exception instead of just logging an error message.
+- Renamed RecastGraph.SnapForceBoundsToScene to \reflink{RecastGraph.SnapBoundsToScene}.
+- RecastGraph.SnapBoundsToScene will now ensure the resulting bounds are non-zero along all axes.
+- Improved smoothness of the \reflink{FollowerEntity} when using the \reflink{MovementPlaneSource}.NavmeshNormal mode.
+- The \ref spherical example scene now uses the \reflink{FollowerEntity} component instead of the \reflink{AIPathAlignedToSurface} component.
+- \reflink{AstarPath.showSearchTree} now renders the search tree with thicker lines, to make it easier to see.
+- Deprecated \reflink{PointNode.SetPosition}. Use \reflink{PointNode.position} instead.
+- Fixed \reflink{GridGraphRule.Pass}.AfterApplied not being called in some cases.
+
+## 5.1.4 (2024-06-12)
+- Fixed an exception that could be thrown after updating a graph (regression in 5.1.3).
+- Reduced memory usage slightly.
+- Improved performance when updating a recast graph in a scene with a terrain.
+
+## 5.1.3 (2024-06-11)
+- \reflink{FollowerEntity.updatePosition} and \reflink{FollowerEntity.updateRotation} can now be set in the inspector, and the values are no longer reset if the component is disabled.
+- Fixed Unity's Random state would get reset by the FollowerEntity movement script on scene initialization.
+- Paths now take their assigned \reflink{ITraversalProvider} into account when finding the start and end nodes.
+		This fixes several issues where an agent could get stuck and not be able to calculate a path, because the node it was standing on (or the node closest to the destination)
+		was walkable according to the path's \reflink{NNConstraint}, but not according to its \reflink{ITraversalProvider}.
+- Fixed \reflink{FollowerEntity} sometimes getting stuck when traversing non-flat grid graphs.
+- Fixed \reflink{FollowerEntity} could throw an exception if it was disabled while it was traversing an off-mesh link.
+- Exposed a few more properties in the \reflink{FollowerEntity} class, and improved its documentation.
+- The number of temporary nodes for path calculations can now grow automatically. Therefore the ASTAR_MORE_MULTI_TARGET_PATH_TARGETS define is no longer needed.
+		This was only of importance if you used multi target paths with a lot of targets, or if you had a very large number of off-mesh links in your scene.
+- Fixed the 'Round Collider Detail' setting was not visible in the recast graph inspector when in 2D mode in some cases, even when it should.
+- Fixed \reflink{AstarData.DeserializeGraphsAdditive} would not remove null graphs from the end of the list of graphs before appending the new ones.
+- Fixed disabling a \reflink{NavmeshPrefab} component could later cause a null reference exception when the graph was destroyed.
+- Fixed \reflink{NavmeshPrefab}s could sometimes leave a 1 voxel wide gap at their borders (recent regression).
+- Various documentation improvements.
+
 ## 5.1.2 (2024-05-29)
 - Added \reflink{AstarPath.IsPointOnNavmesh} to more easily check if a point is on the navmesh surface of any graph.
 - Added \reflink{NavGraph.IsPointOnNavmesh}, which works the same, but only checks a single graph.
@@ -21,13 +242,13 @@
 - New Features and improvements
 		- Tags applied when recast graphs are scanned will now be preserved even when using navmesh cutting.
 			Previously, navmesh cutting would not be able to preserve these tags.
-			Note that this only applies to tags that are set either on a \reflink{RecastMeshObj} component, or using a graph update that happens during the initial scan.
+			Note that this only applies to tags that are set either on a \reflink{RecastNavmeshModifier} component, or using a graph update that happens during the initial scan.
 		- Navmesh cutting is now better at collapsing adjacent triangles into fewer triangles, if possible.
 			This can improve pathfinding quality, and improve performance ever so slightly.
 		- Restructured the recast graph inspector, with clearer headings and a more consistent layout.
 			\shadowimage{changelog/recastgraph_inspector.png}
 		- Recast graphs now have a new option for per layer modifications.
-			This means you can now set tags or make nodes unwalkable based on the layer of the surface under the node, without having to attach a \reflink{RecastMeshObj} component to every object.
+			This means you can now set tags or make nodes unwalkable based on the layer of the surface under the node, without having to attach a \reflink{RecastNavmeshModifier} component to every object.
 			\shadowimage{recast/per_layer_modifications.png}
 		- \reflink{MecanimBridge} now supports the \reflink{FollowerEntity} movement script.
 		- There's now a button in all relevant example scenes that link them to the corresponding page in the documentation.
@@ -62,8 +283,8 @@
 
 ## 5.0.8 (2024-04-12)
 - Made \reflink{AstarPath.PausePathfindingSoon} public.
-- Made \reflink{FollowerControlSystem.ResolveOffMeshLinkHandler} public.
-- Made \reflink{FollowerControlSystem.NextLinkToTraverse} public.
+- Made \reflink{RepairPathSystem.ResolveOffMeshLinkHandler} public.
+- Made \reflink{RepairPathSystem.NextLinkToTraverse} public.
 - Added a public constructor for \reflink{MovementTarget}.
 
 ## 5.0.7 (2024-04-11)
@@ -83,7 +304,7 @@
 		- Fixed \reflink{AstarPath} drawing graphs even when an unrelated prefab was opened in isolation mode.
 		- Fixed division by zero in \reflink{FollowerEntity} when rotation speed was zero.
 		- Fixed a race condition when scanning or updating recast graphs, which could cause graph updates to throw exception in very rare cases.
-		- Fixed \reflink{RecastMeshObj} with the WalkableSurfaceWithTag mode could fail to apply the tag if it was also marked as solid, and the surface was close to another surface.
+		- Fixed \reflink{RecastNavmeshModifier} with the WalkableSurfaceWithTag mode could fail to apply the tag if it was also marked as solid, and the surface was close to another surface.
 		- Fixed a small GC allocation happening every frame when using the \reflink{FollowerEntity} component.
 		- Fixed the gravity applied to the \reflink{AIPathAlignedToSurface} movement script was much higher than it should be.
 		- Fixed the \reflink{AIPathAlignedToSurface} movement script could throw an exception when completely inside a convex mesh collider.
@@ -100,7 +321,7 @@
 - Fixed \reflink{RandomPath} could in very rare situations cause an exception that crashed the pathfinding threads, due to a race condition.
 - Fixed \reflink{MultiTargetPath} could calculate incorrect paths on grid graphs in some situations.
 - Fixed various edge cases when the AstarPath component is put in a prefab.
-- Fixed \reflink{RecastMeshObj} components could log an error message about being moved, even if they had not moved.
+- Fixed \reflink{RecastNavmeshModifier} components could log an error message about being moved, even if they had not moved.
 - Fixed enabling \reflink{ABPath.calculatePartial} could cause an exception or an incorrect path to be calculated, in some situations.
 - Fixed several broken documentation links.
 - If an \reflink{RVOSimulator} is enabled in a scene that already has an active RVOSimulator, the new one will be disabled and a warning will be logged.
@@ -244,11 +465,11 @@
 		- Recast graphs now treat convex colliders (box, sphere, capsule and convex mesh colliders) are as solid, and will no longer generate a navmesh inside of them.
 		- Recast graphs now have better support for trees
 			- Colliders on child objects will also be taken into account.
-			- You can use the \reflink{RecastMeshObj} component on trees to cutomize how they are rasterized.
+			- You can use the \reflink{RecastNavmeshModifier} component on trees to cutomize how they are rasterized.
 			- Significantly improved performance when you have many trees.
 			- Tree rotation is now taken into account.
 		- You can now mark surfaces with specific tags, for recast graphs.
-			Just add the \reflink{RecastMeshObj} component to an object and set the mode to \reflink{RecastMeshObj.Mode.WalkableSurfaceWithTag}.
+			Just add the \reflink{RecastNavmeshModifier} component to an object and set the mode to \reflink{RecastNavmeshModifier.Mode.WalkableSurfaceWithTag}.
 		- \reflink{NavmeshCut}s now support some 3D shapes (box/sphere/capsule) in addition to the previous 2D shapes (rectangle/circle) which makes them a lot more pleasant to use.
 			- \video{generated/scenes/MiscVideos/navmeshcutshapes.webm}
 		- \reflink{NavmeshCut}s now support expanding the cut by the agent radius. Making them more useful if you have multiple graphs for different agent sizes.
@@ -277,7 +498,7 @@
 		- \reflink{NodeLink2}'s gizmos are now aligned to the graph it is connected to.
 		- Improved performance when doing small graph updates on a recast graph, when there's a large terrain in the scene.
 		- Optimized graph updates on recast graph so that if multiple graph updates are scheduled that try to update the same tiles, it will try to avoid doing duplicate work.
-			This can significantly improve performance when using e.g. the \reflink{DynamicGridObstacle} component.
+			This can significantly improve performance when using e.g. the \reflink{DynamicObstacle} component.
 		- Reworked how one-way links are handled internally.
 			This fixes a number of issues with one-way links, that could lead to exceptions or pathfinding just not working.
 			Even for a one-way link, the target node now also knows that it has a connection to the source node.
@@ -300,7 +521,7 @@
 		- Graphs are now scanned and updated concurrently.
 			Previously, only one graph could be scanned or updated at a time (even if they might have used parallelism internally).
 		- Added a new example movement behavior: \reflink{MoveInCircle}.
-		- Improve graph update performance when there are lots of dynamic \reflink{RecastMeshObj} components in the scene.
+		- Improve graph update performance when there are lots of dynamic \reflink{RecastNavmeshModifier} components in the scene.
 		- The documentation now includes screenshots of the inspector for all components in the package.
 		- Added \reflink{AstarPath.OnPathsCalculated}.
 		- Added \reflink{GraphDebugMode.NavmeshBorderObstacles}.
@@ -330,9 +551,9 @@
 		- Added the \reflink{PathfindingTag} struct. You can add this to your scripts to automatically get a nice dropdown in the inspector for selecting pathfinding tags.
 		- Added \reflink{GraphNode.ContainsPoint(Vector3)} and \reflink{GraphNode.ContainsPointInGraphSpace}.
 		- Added \reflink{GridNodeBase.ContainsPoint} and \reflink{GridNodeBase.ContainsPointInGraphSpace}.
-		- \reflink{RecastMeshObj} components now have a "Geometry Source" field, so that you can choose manually if you want to use a mesh or a collider when voxelizing it.
-		- \reflink{RecastMeshObj} components now have a "Include In Scan" field, which allows you to choose if the object should be filtered using layer/tag masks, or if it should always/never be included in the scan.
-			Previously RecastMeshObj components were always included in the scan. When upgrading from, all existing RecastMeshObj components will be set to "AlwaysInclude" for compatibility.
+		- \reflink{RecastNavmeshModifier} components now have a "Geometry Source" field, so that you can choose manually if you want to use a mesh or a collider when voxelizing it.
+		- \reflink{RecastNavmeshModifier} components now have a "Include In Scan" field, which allows you to choose if the object should be filtered using layer/tag masks, or if it should always/never be included in the scan.
+			Previously RecastNavmeshModifier components were always included in the scan. When upgrading from, all existing RecastNavmeshModifier components will be set to "AlwaysInclude" for compatibility.
 		- Added support for scheduling paths (\reflink{AstarPath.StartPath}) from within the Unity Job System.
 		- Allow running nearest node queries and other node lookup functions from within the unity job system.
 			This requires you to call the \reflink{AstarPath.LockGraphDataForReading} function to ensure safety.
@@ -365,11 +586,11 @@
 			end up within \reflink{AIBase.endReachedDistance} units from the destination.
 			Essentially \reflink{AIBase.reachedDestination} would remain false even though the agent could actually reach the destination by just moving a bit further.
 			So this behavior has been changed so that it now only stops when it is within \reflink{AIBase.endReachedDistance} units from the destination, not the end of the path.
-		- The \reflink{RecastMeshObj} now has an option for making a mesh solid. This is useful to prevent a navmesh from being generated inside objects.
+		- The \reflink{RecastNavmeshModifier} now has an option for making a mesh solid. This is useful to prevent a navmesh from being generated inside objects.
 		- Added \reflink{Pathfinding.ITraversalProvider;ITraversalProvider.CanTraverse(path,from,to)}.
 			This allows you to control not only which nodes are traversable, but also which connections can be used.
 		- The \reflink{ProceduralGraphMover} script now has an option for specifying which graph to update.
-		- Added a mode for the RecastMeshObj to make objects be completely ignored when scanning recast graphs.
+		- Added a mode for the RecastNavmeshModifier to make objects be completely ignored when scanning recast graphs.
 			This is useful if you are running out of layers in your project.
 		- Added \reflink{GridNodeBase.HasAnyGridConnections}.
 		- Removed LayerGridGraph.mergeSpanRange. This was a rarely used and hard to understand setting. Now it is automatically set to half the LayerGridGraph.characterHeight.
@@ -525,7 +746,7 @@
 		- \reflink{PointGraph.optimizeForSparseGraph} is now included in the free version too. This option makes scanning a large point graph much faster.
 		- Changed some private fields in \reflink{AIPath} to be protected instead, to make it easier to subclass it.
 		- Changed the signature of GraphNode.GetPortal to use out-parameters instead of output lists. The old signature will continue to work, but it is marked as deprecated.
-		- Moved ProceduralGraphMover and DynamicGridObstacle out from the ExampleScenes folder to the Utilities folder.
+		- Moved ProceduralGraphMover and DynamicObstacle out from the ExampleScenes folder to the Utilities folder.
 		- Change: \reflink{LevelGridNode.HasAnyGridConnections} is now a property instead of a method.
 		- Renamed GridGraph.maxClimb to the more descriptive name \reflink{Pathfinding.GridGraph.maxStepHeight}.
 - <b>Fixes</b>
@@ -538,7 +759,7 @@
 		- Added \reflink{OffMeshLinks.GetNearest}.
 		- The navmesh graph will now warn if the input mesh contains duplicate triangle edges, instead of crashing.
 		- Fixed \reflink{AstarPath.FlushGraphUpdates} and \reflink{FlushWorkItems} would not flush items if some were in progress, but none were queued.
-		- Improved error handling for \reflink{RecastMeshObj} when it is moved during runtime.
+		- Improved error handling for \reflink{RecastNavmeshModifier} when it is moved during runtime.
 		- Fixed paths contained some internal fields which made it impossible to write custom path types.
 		- Fixed some linecast edge cases on grid graphs in which the \reflink{GraphHitInfo}'s fields were not set correctly.
 		- Fixed the recast graph's 'Snap bounds to scene' button could misalign the graph if the graph was rotated.
@@ -553,7 +774,7 @@
 		- Fixed the \reflink{FunnelModifier} could simplify the path incorrectly on rotated recast graphs.
 		- Fixed setting \reflink{RichAI.rotation} while the agent was stationary would rotate the agent, but it would immediately rotate back to the previous heading.
 		- Fixed an exception could be thrown when using the \reflink{NavmeshClamp} script with multiple graphs.
-		- Fixed the \reflink{RecastMeshObj} component would sometimes still affect objects even if it was disabled.
+		- Fixed the \reflink{RecastNavmeshModifier} component would sometimes still affect objects even if it was disabled.
 		- Fixed \reflink{ProceduralGraphMover} not working with layered grid graphs.
 		- Fixed the graphs would be rendered even when the scene view was in prefab isolation mode and you were viewing an unrelated prefab.
 		- Improved error messages when trying to include a non-readable mesh in a recast graph scan.
@@ -665,7 +886,7 @@
 		Now all fields the editor scripts cannot handle will show up automatically.
 - Deprecated \reflink{AstarPath.prioritizeGraphs}.
 - Deprecated some older linecast overloads for grid graphs.
-- Deprecated \reflink{LevelGridNode.GetConnection} in favor of \reflink{LevelGridNode.HasConnectionInDirection}.
+- Deprecated LevelGridNode.GetConnection in favor of \reflink{LevelGridNode.HasConnectionInDirection}.
 
 ## 4.2.17 (2021-11-06)
 - Fixed RVO example scenes not working properly (regression introduced in 4.2.16).
@@ -703,7 +924,7 @@
 		- Exposed \reflink{AILerp.velocity}.
 		- Added a get/set property \reflink{GridGraph.is2D} which is equivalent to the inspector's "2D" toggle.
 		- Added \reflink{GraphUpdateObject.stage} which contains info about if a graph update has been applied or not.
-		- Improved the DynamicGridObstacle to handle cases when graph updates take a very long time in a better way.
+		- Improved the DynamicObstacle to handle cases when graph updates take a very long time in a better way.
 		- Improved the \reflink{NavmeshAdd} component inspector.
 		- Added a \reflink{NavmeshClipper.graphMask} field to the \reflink{NavmeshCut} and \reflink{NavmeshAdd} components.
 - Changes
@@ -751,7 +972,7 @@
 		- Fixed RichAI trying to traverse an off mesh link twice if the path's endpoint was also the endpoint of an off-mesh link.
 		- Fixed a missing script in the turnbased example scene causing warnings when opening that scene.
 		- Fixed warnings would be logged when first importing the package on recent version of Unity due to a change in how Unity imports fbx files.
-		- Make DynamicGridObstacle call Physics.SyncTransforms to ensure it has the most up to date data for the collider.
+		- Make DynamicObstacle call Physics.SyncTransforms to ensure it has the most up to date data for the collider.
 		- Removed 'Upgrading serialized data ...' message as it was mostly just annoying.
 		- Fixed GameObject references (like the PointGraph's Root field) would not get serialized properly if the AstarPath component was stored in a prefab.
 		- Fixed some smaller memory memory leaks in the unity editor.
@@ -763,11 +984,11 @@
 - Fixed the package would report the wrong version number. This could cause the "New Update Available" window to show up unnecessarily.
 
 ## 4.2.14 (2020-03-23)
-- Fixed DynamicGridObstacle throwing an exception when scanning sometimes. This bug was introduced in 4.2.13.
+- Fixed DynamicObstacle throwing an exception when scanning sometimes. This bug was introduced in 4.2.13.
 
 ## 4.2.13 (2020-03-21)
 - Fixed paths could sometimes be cancelled without a reason if 'draw gizmos' was disabled on the Seeker component. Thanks Eran for reporting the bug.
-- Fixed DynamicGridObstacle logging an error about not having a collider attached even outside of play mode.
+- Fixed DynamicObstacle logging an error about not having a collider attached even outside of play mode.
 
 ## 4.2.12 (2020-02-20)
 - Fixed "Not allowed to access vertices on mesh" error which some users are seeing after upgrading to Unity 2019.3.
@@ -900,7 +1121,7 @@
 			The existing \link Pathfinding.IAstarAI.reachedEndOfPath reachedEndOfPath\endlink property has some quirks, which are very reasonable when considering how everything works,
 			but are not very intuitive for new users and it can easily lead to quite brittle code. This new property will work as expected for most use cases.
 		- Added a height and radius for the AIPath and RichAI movement scripts.
-			This in turn deprecates the old #Pathfinding.AIBase.centerOffset field as it is now implicitly height/2.
+			This in turn deprecates the old Pathfinding.AIBase.centerOffset field as it is now implicitly height/2.
 			If an RVOController is attached to the same GameObject, its height and radius will be driven by the movement script's values.
 			The script will try to autodetect reasonable height and radius values from other attached components upon upgrading.
 		- Improved look of all movement script inspectors by grouping the fields into different sections. Also added some validation to prevent invalid field values.
@@ -953,7 +1174,7 @@
 			In Unity object destruction is delayed until after the Update loop, but the script did not wait to update the graph until after the object had actually been destroyed. Thanks djzombie for reporting this.
 		- Fixed recalculating a part of a recast graph using a graph update object would not expand the bounding box with the character radius to make sure that all tiles that could be affected by something inside the box were updated.
 		- Worked around occational crashes when using RVO with the IL2CPP backend due to a bug in IL2CPP.
-		- Fixed scanning a recast graph could throw an exception if there was a RecastMeshObj component attached to a GameObject with a MeshFilter that had a null/missing mesh. Thanks ccm for finding the bug.
+		- Fixed scanning a recast graph could throw an exception if there was a RecastNavmeshModifier component attached to a GameObject with a MeshFilter that had a null/missing mesh. Thanks ccm for finding the bug.
 		- Fixed FloodPath throwing an exception when starting on a node that isn't connected to any other node. Thanks BulwarkStudios for finding the bug.
 		- Fixed applying optimizations (under the Optimizations tab) could cause several error messages to be logged about unsupported platforms in Unity 2018.1 or newer. Thanks NFMonster for reporting the issue.
 		- Rotation speed and acceleration are now decoupled for AIPath and RichAI. Previously the acceleration limited how quickly the agents could rotate due to how the math for <a href="https://en.wikipedia.org/wiki/Centripetal_force">centripetal acceleration</a> works out.
@@ -1031,7 +1252,7 @@
 		- The RaycastModifier has changed a bit, so your paths might look slightly different, however in all but very rare cases it should be at least as good as in previous versions.
 		- Linecast methods will now assign the #Pathfinding.GraphHitInfo.node field with the last node that was traversed in case no obstacle was hit, previously it was always null.
 		- Multithreading is now enabled by default (1 thread). This may affect you if you have been adding the AstarPath component during runtime using a script, though the change is most likely positive.
-		- The DynamicGridObstacle component will now properly update the graph when the object is deactivated since the object just disappeared and shouldn't block the graph anymore.
+		- The DynamicObstacle component will now properly update the graph when the object is deactivated since the object just disappeared and shouldn't block the graph anymore.
 			Previously it only did this if the object was destroyed, not if it was deactivated.
 		- If you have written a custom graph type you may have to change the access modifier on some methods.
 			For example the ScanInternal method has been changed from being public to being protected.
@@ -1085,7 +1306,7 @@
 		- Linecast methods will now assign the #Pathfinding.GraphHitInfo.node field with the last node that was traversed in case no obstacle was hit.
 		- Linecast on graphs now set the hit point to the endpoint of the line if no obstacle was hit. Previously the endpoint would be set to Vector3.zero. Thanks borluse for suggesting this.
 		- Multithreading is now enabled by default (1 thread).
-		- The DynamicGridObstacle component now works with 2D colliders.
+		- The DynamicObstacle component now works with 2D colliders.
 		- Clicking on the graph name in the inspector will no longer focus the name text field.
 			To edit the graph name you will now have to click the Edit/Pen button to the right of the graph name.
 			Previously it was easy to focus the text field by mistake when you actually wanted to show the graph settings.
@@ -1188,7 +1409,7 @@
 		- Fixed the AIPath script with rotationIn2D would rotate so that the Z axis pointed in the -Z direction instead of as is common for Unity 2D objects: to point in the +Z direction.
 		- Fixed the AILerp script with rotationIn2D would rotate incorrectly if it started out with the Z axis pointed in the -Z direction.
 		- Clamp recast graph bounding box size to be non-zero on all axes.
-		- The DynamicGridObstacle component will now properly update the graph when the object is deactivated since the object just disappeared and shouldn't block the graph anymore.
+		- The DynamicObstacle component will now properly update the graph when the object is deactivated since the object just disappeared and shouldn't block the graph anymore.
 			Previously it only did this if the object was destroyed, not if it was deactivated.
 		- Fixed \link Pathfinding.AILerp AILerp\endlink ceasing to work properly if one of the paths it tries to calculate fails.
 		- Fixed the \link Pathfinding.FunnelModifier FunnelModifier\endlink could yield a zero length path in some rare circumstances when using custom node links.
@@ -1233,7 +1454,7 @@
 - Added a new get started video tutorial. See \ref getstarted.
 - The PointGraph.nodeCount property is now protected instead of private, which fixes some compatibility issues.
 - Improved compatibility with Unity 2017.1, esp. when using the experimental .Net 4.6 target. Thanks Scott_Richmond for reporting the issues.
-- Fixed DynamicGridObstacle trying to update the graphs even when outside of play mode.
+- Fixed DynamicObstacle trying to update the graphs even when outside of play mode.
 - Fixed runtime error when targeting the Windows Store. Thanks cedtat for reporting the bug.
 - Fixed compilation error when targeting the Windows Store. Introduced in 4.0.3. Thanks cedtat for reporting the bug.
 
@@ -1249,7 +1470,7 @@
 - Fixed graph gizmo lines could be rendered incorrectly on Unity 5.6 on mac and possibly on Windows too.
 
 ## 4.0.8 (2017-04-28)
-- Added \link Pathfinding.AIBase.rotationIn2D rotationIn2D\endlink to the AIPath script. It makes it possible to use the Y axis as the forward axis of the character which is useful for 2D games.
+- Added rotationIn2D to the AIPath script. It makes it possible to use the Y axis as the forward axis of the character which is useful for 2D games.
 - Exposed the GridGraph.LayerCount property which works for both grid graphs and layered grid graphs (for grid graphs it always returns 1).
 - Made the LayerGridGraph.layerCount field internal to discourage its use outside the LayerGridGraph class.
 - Fixed exception when destroying some graph types (introduced in 4.0.6). Thanks unfalco for reporting the bug.
@@ -1344,7 +1565,7 @@
 					Previously the movement could be drastically different when the RVOController was used
 					and local avoidance didn't work well when the agent was at the edge of the navmesh.
 				- Improved gizmos for the RVOController.
-				- Added \link Pathfinding.RVO.RVOController.ForceSetVelocity RVOController.ForceSetVelocity\endlink to use when you want agents to avoid a player (or otherwise externally controlled) character.
+				- Added RVOController.ForceSetVelocity to use when you want agents to avoid a player (or otherwise externally controlled) character.
 				- RVO agents can now have different priorities, lower priority agents will avoid higher priority agents more.
 				- The neighbour distance field is now automatically calculated. This makes it easier to configure the agents and it will
 					also improve performance slightly when the agents are moving slowly (for example in very crowded scenarios).
@@ -1387,7 +1608,7 @@
 				- Reduced the likelihood of the agent spinning around when it reaches the end of the path.
 			- Scanning the graph using AstarPath.Scan will now profile the various parts of the graph scanning
 				process using the Unity profiler (Profiler.BeginSample and Profiler.EndSample).
-			- \link Pathfinding.DynamicGridObstacle DynamicGridObstacle \endlink will now update the graph immediately if an object with that component is created during runtime
+			- \link Pathfinding.DynamicObstacle DynamicObstacle \endlink will now update the graph immediately if an object with that component is created during runtime
 				instead of waiting until it was moved for the first time.
 			- \link Pathfinding.GraphUpdateScene GraphUpdateScene \endlink and \link Pathfinding.GraphUpdateShape GraphUpdateShape \endlink can now handle rotated graphs a lot better.
 				The rotation of the object the GraphUpdateScene component is attached to determines the 'up' direction for the shape
@@ -1414,7 +1635,7 @@
 			- \link Pathfinding.RaycastModifier RaycastModifier \endlink now supports multi editing.
 			- Added \link Pathfinding.GraphNode.RandomPointOnSurface GraphNode.RandomPointOnSurface \endlink.
 			- Added \link Pathfinding.GraphNode.SurfaceArea GraphNode.SurfaceArea \endlink.
-			- \link Pathfinding.Int2 Int2 \endlink and \link Pathfinding.Int3 Int3 \endlink now implement IEquatable for slightly better performance and fewer allocations in some places.
+			- Int2 and \link Pathfinding.Int3 Int3 \endlink now implement IEquatable for slightly better performance and fewer allocations in some places.
 			- \link Pathfinding.Examples.LocalSpaceRichAI LocalSpaceRichAI \endlink can now be used with any rotation (even things like moving on an object that is upside down).
 			- The \link Pathfinding.FunnelModifier funnel modifier \endlink can now handle arbitrary graphs (even graphs in the 2D plane) if the new unwrap option is enabled.
 			- The \link Pathfinding.FunnelModifier funnel modifier \endlink can split the resulting path at each portal if the new \link Pathfinding.FunnelModifier.splitAtEveryPortal splitAtEveryPortal \endlink option is enabled.
@@ -1540,7 +1761,7 @@
 		- Fixed LayerGridGraphs' "max climb" setting not working properly with rotated graphs.
 		- Fixed LayerGridGraphs' "character height" setting not working properly with rotated graphs.
 		- Fixed LayerGridGraphs assuming there were no obstacles nearby if no ground was found.
-		- Fixed DynamicGridObstacle getting caught in an infinite loop if there was no AstarPath component in the scene when it was created. Thanks MeiChen for finding the bug.
+		- Fixed DynamicObstacle getting caught in an infinite loop if there was no AstarPath component in the scene when it was created. Thanks MeiChen for finding the bug.
 		- Fixed NodeLink2 deserialization causing exceptions if the node hadn't linked to anything when it was serialized. Thanks Skalev for finding the bug.
 		- Fixed the AlternativePath modifier could crash the pathfinding threads if it logged a warning since it used the Debug.Log(message,object) overload which
 			can only be used from the Unity thread.
@@ -1581,8 +1802,8 @@
 		- TileHandlerHelper will now work even if Scan On Awake in A* Inspector -> Settings is false and you are scanning the graph later.
 		- Fixed AstarWorkItem.init could be called multiple times.
 		- Fixed some documentation typos.
-		- Fixed colliders being included twice in the recast rasterization if the GameObject had a RecastMeshObj attached to it which effectively made RecastMeshObj not work well at all with colliders.
-		- Fixed inspector for RecastMeshObj not updating if changes were done to the fields by a script or when an undo or redo was done.
+		- Fixed colliders being included twice in the recast rasterization if the GameObject had a RecastNavmeshModifier attached to it which effectively made RecastNavmeshModifier not work well at all with colliders.
+		- Fixed inspector for RecastNavmeshModifier not updating if changes were done to the fields by a script or when an undo or redo was done.
 		- Fixed SimpleSmoothModifier custom editor would sometimes set all instances of a field to the same value
 			when editing multiple objects at the same time.
 		- Fixed division by zero when the TimeScale was zero in the AstarDebugger class. Thanks Booil Jung for reporting the issue.
@@ -1694,14 +1915,14 @@
 
 ## 3.8.2 (2016-02-29)
 - Improvements
-		- DynamicGridObstacle now handles rotation and scaling better.
-		- Reduced allocations due to coroutines in DynamicGridObstacle.
+		- DynamicObstacle now handles rotation and scaling better.
+		- Reduced allocations due to coroutines in DynamicObstacle.
 - Fixes
 		- Fixed AstarPath.limitGraphUpdates not working properly most of the time.
 			In order to keep the most common behaviour after the upgrade, the value of this field will be reset to false when upgrading.
-		- Fixed DynamicGridObstacle not setting the correct bounds at start, so the first move of an object with the DynamicGridObstacle
+		- Fixed DynamicObstacle not setting the correct bounds at start, so the first move of an object with the DynamicObstacle
 			component could leave some nodes unwalkable even though they should not be. Thanks Dima for reporting the bug.
-		- Fixed DynamicGridObstacle stopping to work after the GameObject it is attached to is deactivated and then activated again.
+		- Fixed DynamicObstacle stopping to work after the GameObject it is attached to is deactivated and then activated again.
 		- Fixed RVOController not working after reloading the scene due to the C# '??' operator not being equivalent to checking
 			for '== null' (it doesn't use Unity's special comparison check). Thanks Khan-amil for reporting the bug.
 		- Fixed typo in documentation for ProceduralGraphMover.floodFill.
@@ -2043,7 +2264,7 @@
 		- Added penaltyAnglePower to Grid Graph -> Extra -> Penalty from Angle.\n
 			This can be used to increase the penalty even more for large angles than for small angles (more than it already does, that is).
 		- ASTAR_NO_JSON now works for recast graphs as well.
-		- Added custom inspector for RecastMeshObj, hopefully it will not be as confusing anymore.
+		- Added custom inspector for RecastNavmeshModifier, hopefully it will not be as confusing anymore.
 - Changes:
 		- FleePath now has a default flee strength of 1 to avoid confusion when the FleePath doesn't seem to flee from anything.
 		- Removed some irrelevant defines from the Optimizations tab.
@@ -2258,7 +2479,7 @@
 		- Navmesh Cutting can now be done on recast graphs. This is a kind of (relatively) cheap graph updating which punches a hole in the navmesh to make place for obstacles.
 			So it only supports removing geometry, not adding it (like bridges). This update is comparitively fast, and it makes real time navmesh updating possible.
 			See video: http://youtu.be/qXi5qhhGNIw.
-		- Added RecastMeshObj which can be attached to any GameObject to include that object in recast rasterization. It exposes more options and is also
+		- Added RecastNavmeshModifier which can be attached to any GameObject to include that object in recast rasterization. It exposes more options and is also
 			faster for graph updates with logarithmic lookup complexity instead of linear (good for larger worlds when doing graph updating).
 		- Reintroducing special connection costs for start and end nodes.
 			Before multithreading was introduced, pathfinding on navmesh graphs could recalculate
@@ -2594,7 +2815,7 @@
 - Placed the Scan keyboard shortcut code in a different place, hopefully it will work more often now
 - Disabled GUILayout in the AstarPath script for a possible small speed boost
 - Some debug variables (such as AstarPath.PathsCompleted) are now only updated if the ProfileAstar define is enabled
-- DynamicGridObstacle will now update nodes correctly when the object is destroyed
+- DynamicObstacle will now update nodes correctly when the object is destroyed
 - Unwalkable nodes no longer shows when Show Graphs is not toggled
 - Removed Path.multithreaded since it was not used
 - Removed Path.preCallback since it was obsolate
@@ -2646,7 +2867,7 @@
 - Height (Y position) can now be usd to add penalty to nodes
 - Prioritized graphs can be used to enable prioritizing some graphs before others when they are overlapping
 - Several bug fixes
-- Included a new DynamicGridObstacle.cs script which can be attached to any obstacle with a collider and it will update grids around it to account for changed position
+- Included a new DynamicObstacle.cs script which can be attached to any obstacle with a collider and it will update grids around it to account for changed position
 ## 3.0.1
 - Fixed Unity 3.3 compability
 ## 3.0

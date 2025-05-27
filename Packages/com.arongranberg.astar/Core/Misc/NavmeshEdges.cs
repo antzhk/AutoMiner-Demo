@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using Pathfinding.Sync;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
@@ -13,6 +13,7 @@ namespace Pathfinding {
 	using Pathfinding.RVO;
 	using Pathfinding.Jobs;
 	using Pathfinding.Drawing;
+	using Pathfinding.Collections;
 
 	[BurstCompile]
 	public class NavmeshEdges {
@@ -337,9 +338,10 @@ namespace Pathfinding {
 								continue;
 							}
 
-							for (int j = 0; j < group.vertexCount - 1; j++) {
-								var p1 = vertices[offset + j];
-								var p2 = vertices[offset + j + 1];
+							var loop = group.type == RVO.ObstacleType.Loop;
+							for (int a = offset + (loop ? group.vertexCount - 1 : 0), b = offset + (loop ? 0 : 1); b < offset + group.vertexCount; a = b, b++) {
+								var p1 = vertices[a];
+								var p2 = vertices[b];
 								var mn = math.min(p1, p2);
 								var mx = math.max(p1, p2);
 								// Check for intersection with the global bounds (coarse check)
@@ -349,22 +351,6 @@ namespace Pathfinding {
 									mn = math.min(p1local, p2local);
 									mx = math.max(p1local, p2local);
 									// Check for intersection with the local bounds (more accurate)
-									if (math.all((mx >= localMn) & (mn <= localMx))) {
-										edgeBuffer[edgeVertexOffset++] = p1local.xz;
-										edgeBuffer[edgeVertexOffset++] = p2local.xz;
-									}
-								}
-							}
-							if (group.type == RVO.ObstacleType.Loop) {
-								var p1 = vertices[offset + group.vertexCount - 1];
-								var p2 = vertices[offset];
-								var mn = math.min(p1, p2);
-								var mx = math.max(p1, p2);
-								if (math.all((mx >= globalMn) & (mn <= globalMx))) {
-									var p1local = worldToMovementPlane.ToXZPlane(p1);
-									var p2local = worldToMovementPlane.ToXZPlane(p2);
-									mn = math.min(p1local, p2local);
-									mx = math.max(p1local, p2local);
 									if (math.all((mx >= localMn) & (mn <= localMx))) {
 										edgeBuffer[edgeVertexOffset++] = p1local.xz;
 										edgeBuffer[edgeVertexOffset++] = p2local.xz;
@@ -384,12 +370,11 @@ namespace Pathfinding {
 				GetHierarchicalNodesInRangeRec(hierarchicalNode, bounds, hierarhicalNodeData.connectionAllocator, hierarhicalNodeData.connectionAllocations, hierarhicalNodeData.bounds, obstacleIndexBuffer);
 			}
 
-			public void GetEdgesInRange (int hierarchicalNode, Bounds localBounds, NativeList<float2> edgeBuffer, NativeMovementPlane movementPlane) {
+			public void GetEdgesInRange (int hierarchicalNode, Bounds localBounds, NativeList<float2> edgeBuffer, NativeList<int> scratchBuffer, NativeMovementPlane movementPlane) {
 				if (!obstacleData.obstacleVertices.IsCreated) return;
 
-				var indices = new NativeList<int>(8, Allocator.Temp);
-				GetObstaclesInRange(hierarchicalNode, movementPlane.ToWorld(localBounds), indices);
-				ConvertObstaclesToEdges(ref obstacleData, indices, localBounds, edgeBuffer, movementPlane);
+				GetObstaclesInRange(hierarchicalNode, movementPlane.ToWorld(localBounds), scratchBuffer);
+				ConvertObstaclesToEdges(ref obstacleData, scratchBuffer, localBounds, edgeBuffer, movementPlane);
 			}
 		}
 	}

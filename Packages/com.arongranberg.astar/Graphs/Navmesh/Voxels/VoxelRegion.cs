@@ -78,8 +78,6 @@ namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 
 				CompactVoxelSpan cs = compactSpans[ci];
 
-				//Debug.DrawRay (ConvertPosition(cx,cz,ci),Vector3.up, Color.cyan);
-
 				// Check if any of the neighbours already have a valid region set.
 				ushort ar = 0;
 
@@ -178,14 +176,6 @@ namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 		public void Execute () {
 			srcQue.Clear();
 			dstQue.Clear();
-
-			/*System.Diagnostics.Stopwatch w0 = new System.Diagnostics.Stopwatch();
-			System.Diagnostics.Stopwatch w1 = new System.Diagnostics.Stopwatch();
-			System.Diagnostics.Stopwatch w2 = new System.Diagnostics.Stopwatch();
-			System.Diagnostics.Stopwatch w3 = new System.Diagnostics.Stopwatch();
-			System.Diagnostics.Stopwatch w4 = new System.Diagnostics.Stopwatch();
-			System.Diagnostics.Stopwatch w5 = new System.Diagnostics.Stopwatch();
-			w3.Start();*/
 
 			int w = field.width;
 			int d = field.depth;

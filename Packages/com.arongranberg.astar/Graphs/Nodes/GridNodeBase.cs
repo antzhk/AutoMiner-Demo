@@ -81,14 +81,14 @@ namespace Pathfinding {
 		/// See: <see cref="ZCoordinateInGrid"/>
 		/// See: <see cref="NodeInGridIndex"/>
 		/// </summary>
-		public Int2 CoordinatesInGrid {
+		public Vector2Int CoordinatesInGrid {
 			[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
 			get {
 				var width = GridNode.GetGridGraph(GraphIndex).width;
 				var index = NodeInGridIndex;
 				var z = index / width;
 				var x = index - z * width;
-				return new Int2(x, z);
+				return new Vector2Int(x, z);
 			}
 		}
 

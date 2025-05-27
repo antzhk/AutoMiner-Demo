@@ -1,8 +1,10 @@
 using UnityEngine;
 using System.Collections.Generic;
-using Pathfinding.Util;
-using Pathfinding.Serialization;
 using UnityEngine.Profiling;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine.Assertions;
+using Pathfinding.Collections;
 
 namespace Pathfinding.Graphs.Navmesh {
 	/// <summary>
@@ -11,7 +13,7 @@ namespace Pathfinding.Graphs.Navmesh {
 	///
 	/// See: navmeshcutting (view in online documentation for working links)
 	/// See: <see cref="AstarPath.navmeshUpdates"/>
-	/// See: <see cref="Pathfinding.NavmeshBase.enableNavmeshCutting"/>
+	/// See: <see cref="NavmeshBase.enableNavmeshCutting"/>
 	/// </summary>
 	[System.Serializable]
 	public class NavmeshUpdates {
@@ -42,135 +44,272 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// </summary>
 		public float updateInterval;
 		internal AstarPath astar;
+		List<NavmeshUpdateSettings> listeners = new List<NavmeshUpdateSettings>();
 
 		/// <summary>Last time navmesh cuts were applied</summary>
 		float lastUpdateTime = float.NegativeInfinity;
 
 		/// <summary>Stores navmesh cutting related data for a single graph</summary>
-		public class NavmeshUpdateSettings {
-			public TileHandler handler;
-			public readonly List<IntRect> forcedReloadRects = new List<IntRect>();
-			readonly NavmeshBase graph;
+		// When enabled the following invariant holds:
+		// - This class should be listening for updates to the NavmeshCut.allEnabled list
+		// - The clipperLookup should be non-null
+		// - The tileLayout should be valid
+		// - The dirtyTiles array should be valid
+		//
+		// When disabled the following invariant holds:
+		// - This class is not listening for updates to the NavmeshCut.allEnabled list
+		// - The clipperLookup should be null
+		// - The dirtyTiles array should be disposed
+		// - dirtyTileCoordinates should be empty
+		//
+		public class NavmeshUpdateSettings : System.IDisposable {
+			internal readonly NavmeshBase graph;
+			public GridLookup<NavmeshClipper> clipperLookup;
+			public TileLayout tileLayout;
+			UnsafeBitArray dirtyTiles;
+			List<Vector2Int> dirtyTileCoordinates = new List<Vector2Int>();
+
+			public bool attachedToGraph { get; private set; }
+			public bool enabled => clipperLookup != null;
+			public bool anyTilesDirty => dirtyTileCoordinates.Count > 0;
+
+			void AssertEnabled () {
+				if (!enabled) throw new System.InvalidOperationException($"This method cannot be called when the {nameof(NavmeshUpdateSettings)} is disabled");
+			}
 
 			public NavmeshUpdateSettings(NavmeshBase graph) {
 				this.graph = graph;
+				dirtyTiles = new UnsafeBitArray(0, Allocator.Persistent);
+			}
+
+			public NavmeshUpdateSettings(NavmeshBase graph, TileLayout tileLayout) {
+				this.graph = graph;
+				if (graph.enableNavmeshCutting) SetLayout(tileLayout);
+			}
+
+			public void UpdateLayoutFromGraph () {
+				if (enabled) ForceUpdateLayoutFromGraph();
+			}
+
+			void ForceUpdateLayoutFromGraph () {
+				Assert.IsNotNull(graph.GetTiles());
+				if (graph is NavMeshGraph navmeshGraph) {
+					SetLayout(new TileLayout(navmeshGraph));
+				} else if (graph is RecastGraph recastGraph) {
+					SetLayout(new TileLayout(recastGraph));
+				}
+			}
+
+			void SetLayout (TileLayout tileLayout) {
+				Dispose();
+				this.tileLayout = tileLayout;
+				clipperLookup = new GridLookup<NavmeshClipper>(tileLayout.tileCount);
+				dirtyTiles = new UnsafeBitArray(tileLayout.tileCount.x*tileLayout.tileCount.y, Allocator.Persistent);
+				graph.active.navmeshUpdates.AddListener(this);
+			}
+
+			internal void MarkTilesDirty (IntRect rect) {
+				if (!enabled) return;
+
+				rect = IntRect.Intersection(rect, new IntRect(0, 0, tileLayout.tileCount.x-1, tileLayout.tileCount.y-1));
+				for (int z = rect.ymin; z <= rect.ymax; z++) {
+					for (int x = rect.xmin; x <= rect.xmax; x++) {
+						var index = x + z * tileLayout.tileCount.x;
+						if (!dirtyTiles.IsSet(index)) {
+							dirtyTiles.Set(index, true);
+							dirtyTileCoordinates.Add(new Vector2Int(x, z));
+						}
+					}
+				}
 			}
 
 			public void ReloadAllTiles () {
-				if (handler != null) handler.ReloadInBounds(new IntRect(int.MinValue, int.MinValue, int.MaxValue, int.MaxValue));
+				if (!enabled) return;
+
+				MarkTilesDirty(new IntRect(int.MinValue, int.MinValue, int.MaxValue, int.MaxValue));
+				ScheduleDirtyTilesReload();
 			}
 
-			public void Refresh (bool forceCreate = false) {
-				if (!graph.enableNavmeshCutting) {
-					if (handler != null) {
-						handler.cuts.Clear();
-						ReloadAllTiles();
-						// Make sure the updates are applied immediately.
-						// This is important because if navmesh cutting is enabled immediately after this
-						// then it will call CreateTileTypesFromGraph, and we need to ensure that it is not
-						// calling that when the graph still has cuts in it as they will then be baked in.
-						graph.active.FlushGraphUpdates();
-						graph.active.FlushWorkItems();
-
-						forcedReloadRects.ClearFast();
-						handler = null;
-					}
-				} else if ((handler == null && (forceCreate || NavmeshClipper.allEnabled.Count > 0)) || (handler != null && !handler.isValid)) {
-					// Note: Only create a handler if there are any navmesh cuts in the scene.
-					// We don't want to waste a lot of memory if navmesh cutting isn't actually used for anything
-					// and even more important: we don't want to do any sporadic updates to the graph which
-					// may clear the graph's tags or change it's structure (e.g from the delaunay optimization in the TileHandler).
-
-					// The tile handler is invalid (or doesn't exist), so re-create it
-					handler = new TileHandler(graph);
-					for (int i = 0; i < NavmeshClipper.allEnabled.Count; i++) AddClipper(NavmeshClipper.allEnabled[i]);
-					handler.CreateTileTypesFromGraph();
-
-					// Reload in huge bounds. This will cause all tiles to be updated.
-					forcedReloadRects.Add(new IntRect(int.MinValue, int.MinValue, int.MaxValue, int.MaxValue));
+			public void AttachToGraph () {
+				Assert.AreNotEqual(graph.navmeshUpdateData, this);
+				if (graph.navmeshUpdateData != null) {
+					graph.navmeshUpdateData.Dispose();
+					graph.navmeshUpdateData.attachedToGraph = false;
 				}
+				graph.navmeshUpdateData = this;
+				attachedToGraph = true;
+			}
+
+			public void Enable () {
+				if (enabled) throw new System.InvalidOperationException("Already enabled");
+
+				ForceUpdateLayoutFromGraph();
+				ReloadAllTiles();
+			}
+
+			public void Disable () {
+				if (!enabled) return;
+
+				clipperLookup.Clear();
+				ReloadAllTiles();
+
+				// Reload all tiles immediately.
+				// Disabling navmesh cutting is typically only done in the editor, so performance is not as critical.
+				graph.active.FlushWorkItems();
+
+				Dispose();
+			}
+
+			public void Dispose () {
+				clipperLookup = null;
+				if (dirtyTiles.IsCreated) dirtyTiles.Dispose();
+				dirtyTiles = default;
+				if (graph.active != null) graph.active.navmeshUpdates.RemoveListener(this);
 			}
 
 			public void DiscardPending () {
-				if (handler != null) {
-					for (int j = 0; j < NavmeshClipper.allEnabled.Count; j++) {
-						var cut = NavmeshClipper.allEnabled[j];
-						var root = handler.cuts.GetRoot(cut);
-						if (root != null) cut.NotifyUpdated(root);
-					}
+				if (!enabled) return;
+
+				for (int j = 0; j < NavmeshClipper.allEnabled.Count; j++) {
+					var cut = NavmeshClipper.allEnabled[j];
+					var root = clipperLookup.GetRoot(cut);
+					if (root != null) cut.NotifyUpdated(root);
 				}
 
-				forcedReloadRects.Clear();
+				dirtyTileCoordinates.Clear();
+				dirtyTiles.Clear();
 			}
 
 			/// <summary>Called when the graph has been resized to a different tile count</summary>
-			public void OnResized (IntRect newTileBounds) {
-				if (handler == null) return;
+			public void OnResized (IntRect newTileBounds, TileLayout tileLayout) {
+				if (!enabled) return;
 
-				this.handler.Resize(newTileBounds);
+				clipperLookup.Resize(newTileBounds);
+				this.tileLayout = tileLayout;
 
 				var characterRadius = graph.NavmeshCuttingCharacterRadius;
 
 				// New tiles may have been created when resizing. If a cut was on the edge of the graph bounds,
 				// it may intersect with the new tiles and we will need to recalculate them in that case.
-				var allCuts = handler.cuts.AllItems;
+				var allCuts = clipperLookup.AllItems;
 				for (var cut = allCuts; cut != null; cut = cut.next) {
-					var newGraphSpaceBounds = cut.obj.GetBounds(handler.graph.transform, characterRadius);
-					var newTouchingTiles = handler.graph.GetTouchingTilesInGraphSpace(newGraphSpaceBounds);
+					var newGraphSpaceBounds = ExpandedBounds(cut.obj.GetBounds(tileLayout.transform, characterRadius));
+					var newTouchingTiles = tileLayout.GetTouchingTilesInGraphSpace(newGraphSpaceBounds);
 					if (cut.previousBounds != newTouchingTiles) {
-						handler.cuts.Dirty(cut.obj);
-						handler.cuts.Move(cut.obj, newTouchingTiles);
+						clipperLookup.Dirty(cut.obj);
+						clipperLookup.Move(cut.obj, newTouchingTiles);
 					}
 				}
-			}
 
-			/// <summary>Called when some tiles in a recast graph have been completely recalculated (e.g from scanning the graph)</summary>
-			public void OnRecalculatedTiles (NavmeshTile[] tiles) {
-				Refresh();
-				if (handler != null) handler.OnRecalculatedTiles(tiles);
+				// Transform dirty tile coordinates to be relative to the new tile bounds
+				for (int i = 0; i < dirtyTileCoordinates.Count; i++) {
+					var p = dirtyTileCoordinates[i];
+					if (newTileBounds.Contains(p.x, p.y)) {
+						// Still dirty, but translate it to the new tile coordinates
+						dirtyTileCoordinates[i] = new Vector2Int(p.x - newTileBounds.xmin, p.y - newTileBounds.ymin);
+					} else {
+						// Not in the new bounds, remove it
+						dirtyTileCoordinates.RemoveAtSwapBack(i);
+						i--;
+					}
+				}
 
-				// If the whole graph was updated then mark all navmesh cuts as being up to date.
-				// If only a part of the graph was updated then a navmesh cut might be over the non-updated part
-				// as well, and in that case we don't want to mark it as fully updated.
-				if (graph.GetTiles().Length == tiles.Length) {
-					DiscardPending();
+#if MODULE_COLLECTIONS_2_1_0_OR_NEWER
+				this.dirtyTiles.Resize(newTileBounds.Width * newTileBounds.Height);
+				this.dirtyTiles.Clear();
+#else
+				this.dirtyTiles.Dispose();
+				this.dirtyTiles = new UnsafeBitArray(newTileBounds.Width * newTileBounds.Height, Allocator.Persistent);
+#endif
+				for (int i = 0; i < dirtyTileCoordinates.Count; i++) {
+					this.dirtyTiles.Set(dirtyTileCoordinates[i].x + dirtyTileCoordinates[i].y * newTileBounds.Width, true);
 				}
 			}
 
 			public void Dirty (NavmeshClipper obj) {
-				// If we have no handler then we can ignore this. If we would later create a handler the object would be automatically dirtied anyway.
-				if (handler == null) return;
-				handler.cuts.Dirty(obj);
+				// If we have no clipperLookup then we can ignore this. If we would later create a clipperLookup the object would be automatically dirtied anyway.
+				if (enabled) clipperLookup.Dirty(obj);
 			}
 
 			/// <summary>Called when a NavmeshCut or NavmeshAdd is enabled</summary>
 			public void AddClipper (NavmeshClipper obj) {
+				AssertEnabled();
 				if (!obj.graphMask.Contains((int)graph.graphIndex)) return;
 
-				// Without the forceCreate parameter set to true then no handler will be created
-				// because there are no clippers in the scene yet. However one is being added right now.
-				Refresh(true);
-				if (handler == null) return;
 				var characterRadius = graph.NavmeshCuttingCharacterRadius;
-				var graphSpaceBounds = obj.GetBounds(graph.transform, characterRadius);
-				var touchingTiles = handler.graph.GetTouchingTilesInGraphSpace(graphSpaceBounds);
-				handler.cuts.Add(obj, touchingTiles);
+				var graphSpaceBounds = ExpandedBounds(obj.GetBounds(tileLayout.transform, characterRadius));
+				var touchingTiles = tileLayout.GetTouchingTilesInGraphSpace(graphSpaceBounds);
+				clipperLookup.Add(obj, touchingTiles);
 			}
 
 			/// <summary>Called when a NavmeshCut or NavmeshAdd is disabled</summary>
 			public void RemoveClipper (NavmeshClipper obj) {
-				Refresh();
-				if (handler == null) return;
-				var root = handler.cuts.GetRoot(obj);
+				AssertEnabled();
+				var root = clipperLookup.GetRoot(obj);
 
 				if (root != null) {
-					forcedReloadRects.Add(root.previousBounds);
-					handler.cuts.Remove(obj);
+					MarkTilesDirty(root.previousBounds);
+					clipperLookup.Remove(obj);
 				}
+			}
+
+			public void ScheduleDirtyTilesReload () {
+				AssertEnabled();
+				if (dirtyTileCoordinates.Count == 0) return;
+
+				var size = this.tileLayout.tileCount;
+				graph.active.AddWorkItem(ctx => {
+					ctx.PreUpdate();
+					ReloadDirtyTilesImmediately();
+				});
+			}
+
+			public void ReloadDirtyTilesImmediately () {
+				if (!enabled || dirtyTileCoordinates.Count == 0) return;
+
+				var data = RecastBuilder.CutTiles(graph, clipperLookup, tileLayout).Schedule(dirtyTileCoordinates);
+				data.Complete();
+				var result = data.GetValue();
+				graph.StartBatchTileUpdate();
+
+				if (!result.tileMeshes.tileMeshes.IsCreated) {
+					// The cut job output nothing, indicating that no cuts are affecting the tiles.
+					// We can just replace the tiles with the non-cut tiles.
+					for (int i = 0; i < dirtyTileCoordinates.Count; i++) {
+						var tile = graph.GetTile(dirtyTileCoordinates[i].x, dirtyTileCoordinates[i].y);
+						if (tile.isCut) {
+							graph.ReplaceTilePostCut(tile.x, tile.z, tile.preCutVertsInTileSpace, tile.preCutTris, tile.preCutTags, true, true);
+						} else {
+							// Tile is not cut, and no new cuts are affecting it. Skip it.
+						}
+					}
+				} else {
+					for (int i = 0; i < result.tileMeshes.tileMeshes.Length; i++) {
+						var tileMesh = result.tileMeshes.tileMeshes[i];
+						graph.ReplaceTilePostCut(dirtyTileCoordinates[i].x, dirtyTileCoordinates[i].y, tileMesh.verticesInTileSpace, tileMesh.triangles, tileMesh.tags, true, true);
+					}
+				}
+				result.Dispose();
+				graph.EndBatchTileUpdate();
+				dirtyTileCoordinates.Clear();
+				dirtyTiles.Clear();
 			}
 		}
 
+		static Rect ExpandedBounds (Rect rect) {
+			rect.xMin -= TileHandler.TileSnappingMaxDistance * Int3.PrecisionFactor;
+			rect.yMin -= TileHandler.TileSnappingMaxDistance * Int3.PrecisionFactor;
+			rect.xMax += TileHandler.TileSnappingMaxDistance * Int3.PrecisionFactor;
+			rect.yMax += TileHandler.TileSnappingMaxDistance * Int3.PrecisionFactor;
+			return rect;
+		}
+
 		internal void OnEnable () {
+			// Needs to reset the time if we are using Play Mode Edit Options that do not reset the scene or reload the domain when entering play mode
+			lastUpdateTime = float.NegativeInfinity;
+			Profiler.BeginSample("Refresh navmesh cut enabled list");
+			NavmeshClipper.RefreshEnabledList();
+			Profiler.EndSample();
 			NavmeshClipper.AddEnableCallback(HandleOnEnableCallback, HandleOnDisableCallback);
 		}
 
@@ -179,69 +318,60 @@ namespace Pathfinding.Graphs.Navmesh {
 		}
 
 		public void ForceUpdateAround (NavmeshClipper clipper) {
-			var graphs = astar.graphs;
-
-			if (graphs == null) return;
-
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] is NavmeshBase navmeshBase) navmeshBase.navmeshUpdateData.Dirty(clipper);
+			for (int i = 0; i < listeners.Count; i++) {
+				listeners[i].Dirty(clipper);
 			}
 		}
 
 		/// <summary>Discards all pending updates caused by moved or modified navmesh cuts</summary>
 		public void DiscardPending () {
-			var graphs = astar.graphs;
-
-			if (graphs == null) return;
-
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] is NavmeshBase navmeshBase) navmeshBase.navmeshUpdateData.DiscardPending();
+			for (int i = 0; i < listeners.Count; i++) {
+				listeners[i].DiscardPending();
 			}
 		}
 
 		/// <summary>Called when a NavmeshCut or NavmeshAdd is enabled</summary>
 		void HandleOnEnableCallback (NavmeshClipper obj) {
-			var graphs = astar.graphs;
-
-			if (graphs == null) return;
-
-			for (int i = 0; i < graphs.Length; i++) {
+			for (int i = 0; i < listeners.Count; i++) {
 				// Add the clipper to the individual graphs. Note that this automatically marks the clipper as dirty for that particular graph.
-				if (graphs[i] is NavmeshBase navmeshBase) navmeshBase.navmeshUpdateData.AddClipper(obj);
+				listeners[i].AddClipper(obj);
 			}
 		}
 
 		/// <summary>Called when a NavmeshCut or NavmeshAdd is disabled</summary>
 		void HandleOnDisableCallback (NavmeshClipper obj) {
-			var graphs = astar.graphs;
-
-			if (graphs == null) return;
-
-			for (int i = 0; i < graphs.Length; i++) {
-				if (graphs[i] is NavmeshBase navmeshBase) navmeshBase.navmeshUpdateData.RemoveClipper(obj);
+			for (int i = 0; i < listeners.Count; i++) {
+				listeners[i].RemoveClipper(obj);
 			}
 			lastUpdateTime = float.NegativeInfinity;
+		}
+
+		void AddListener (NavmeshUpdateSettings listener) {
+#if UNITY_EDITOR
+			if (listeners.Contains(listener)) throw new System.ArgumentException("Trying to register a listener multiple times.");
+#endif
+			listeners.Add(listener);
+			for (int i = 0; i < NavmeshClipper.allEnabled.Count; i++) listener.AddClipper(NavmeshClipper.allEnabled[i]);
+		}
+
+		void RemoveListener (NavmeshUpdateSettings listener) {
+			listeners.Remove(listener);
 		}
 
 		/// <summary>Update is called once per frame</summary>
 		internal void Update () {
 			if (astar.isScanning) return;
 			Profiler.BeginSample("Navmesh cutting");
-			bool anyInvalidHandlers = false;
-			var graphs = astar.graphs;
+			bool anyTilesDirty = false;
+			RefreshEnabledState();
 
-			if (graphs != null) {
-				for (int i = 0; i < graphs.Length; i++) {
-					var navmeshBase = graphs[i] as NavmeshBase;
-					if (navmeshBase != null) {
-						navmeshBase.navmeshUpdateData.Refresh();
-						anyInvalidHandlers = navmeshBase.navmeshUpdateData.forcedReloadRects.Count > 0;
-					}
-				}
+			for (int i = 0; i < listeners.Count; i++) {
+				// Tiles can have already been dirtied by, for example, navmesh cuts being disabled
+				anyTilesDirty |= listeners[i].anyTilesDirty;
+			}
 
-				if ((updateInterval >= 0 && Time.realtimeSinceStartup - lastUpdateTime > updateInterval) || anyInvalidHandlers) {
-					ForceUpdate();
-				}
+			if ((updateInterval >= 0 && Time.realtimeSinceStartup - lastUpdateTime > updateInterval) || anyTilesDirty) {
+				ScheduleTileUpdates();
 			}
 			Profiler.EndSample();
 		}
@@ -264,28 +394,38 @@ namespace Pathfinding.Graphs.Navmesh {
 		/// </code>
 		/// </summary>
 		public void ForceUpdate () {
+			RefreshEnabledState();
+			ScheduleTileUpdates();
+		}
+
+		void RefreshEnabledState () {
+			var graphs = astar.graphs;
+			for (int i = 0; i < graphs.Length; i++) {
+				var graph = graphs[i];
+				if (graph is NavmeshBase navmesh) {
+					var shouldBeEnabled = navmesh.enableNavmeshCutting && navmesh.isScanned;
+					if (navmesh.navmeshUpdateData.enabled != shouldBeEnabled) {
+						if (shouldBeEnabled) {
+							navmesh.navmeshUpdateData.Enable();
+						} else {
+							navmesh.navmeshUpdateData.Disable();
+						}
+					}
+				}
+			}
+		}
+
+		void ScheduleTileUpdates () {
 			lastUpdateTime = Time.realtimeSinceStartup;
 
-			var graphs = astar.graphs;
-			if (graphs == null) return;
-
-			for (int graphIndex = 0; graphIndex < graphs.Length; graphIndex++) {
-				var navmeshBase = graphs[graphIndex] as NavmeshBase;
-				if (navmeshBase == null) continue;
-
-				// Done in Update as well, but users may call ForceUpdate directly
-				navmeshBase.navmeshUpdateData.Refresh();
-
-				var handler = navmeshBase.navmeshUpdateData.handler;
-
-				if (handler == null) continue;
-
-				var forcedReloadRects = navmeshBase.navmeshUpdateData.forcedReloadRects;
+			foreach (var handler in listeners) {
+				Assert.IsTrue(handler.enabled);
+				if (!handler.attachedToGraph) continue;
 
 				// Get all navmesh cuts in the scene
-				var allCuts = handler.cuts.AllItems;
+				var allCuts = handler.clipperLookup.AllItems;
 
-				if (forcedReloadRects.Count == 0) {
+				if (!handler.anyTilesDirty) {
 					bool any = false;
 
 					// Check if any navmesh cuts need updating
@@ -300,27 +440,18 @@ namespace Pathfinding.Graphs.Navmesh {
 					if (!any) continue;
 				}
 
-				// Start batching tile updates which is good for performance
-				// if we are updating a lot of them
-				handler.StartBatchLoad();
-
-				for (int i = 0; i < forcedReloadRects.Count; i++) {
-					handler.ReloadInBounds(forcedReloadRects[i]);
-				}
-				forcedReloadRects.ClearFast();
-
 				var characterRadius = handler.graph.NavmeshCuttingCharacterRadius;
 				// Reload all bounds touching the previous bounds and current bounds
 				// of navmesh cuts that have moved or changed in some other way
 				for (var cut = allCuts; cut != null; cut = cut.next) {
 					if (cut.obj.RequiresUpdate(cut)) {
 						// Make sure the tile where it was is updated
-						handler.ReloadInBounds(cut.previousBounds);
+						handler.MarkTilesDirty(cut.previousBounds);
 
-						var newGraphSpaceBounds = cut.obj.GetBounds(handler.graph.transform, characterRadius);
-						var newTouchingTiles = handler.graph.GetTouchingTilesInGraphSpace(newGraphSpaceBounds);
-						handler.cuts.Move(cut.obj, newTouchingTiles);
-						handler.ReloadInBounds(newTouchingTiles);
+						var newGraphSpaceBounds = ExpandedBounds(cut.obj.GetBounds(handler.tileLayout.transform, characterRadius));
+						var newTouchingTiles = handler.tileLayout.GetTouchingTilesInGraphSpace(newGraphSpaceBounds);
+						handler.clipperLookup.Move(cut.obj, newTouchingTiles);
+						handler.MarkTilesDirty(newTouchingTiles);
 
 						// Notify the navmesh cut that it has been updated in this graph
 						// This will cause RequiresUpdate to return false
@@ -329,7 +460,7 @@ namespace Pathfinding.Graphs.Navmesh {
 					}
 				}
 
-				handler.EndBatchLoad();
+				handler.ScheduleDirtyTilesReload();
 			}
 		}
 	}

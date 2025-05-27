@@ -7,6 +7,7 @@ using Unity.Burst;
 namespace Pathfinding.Graphs.Navmesh.Voxelization.Burst {
 	using Pathfinding.Util;
 	using Unity.Collections.LowLevel.Unsafe;
+	using Pathfinding.Collections;
 
 	public struct RasterizationMesh {
 		public UnsafeSpan<float3> vertices;

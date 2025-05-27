@@ -6,7 +6,7 @@ namespace Pathfinding.Jobs {
 	using Unity.Mathematics;
 	using UnityEngine.Assertions;
 	using Pathfinding.Graphs.Grid;
-	using Pathfinding.Util;
+	using Pathfinding.Collections;
 
 	/// <summary>
 	/// Slice of a 3D array.

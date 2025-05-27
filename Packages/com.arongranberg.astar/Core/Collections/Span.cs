@@ -1,11 +1,11 @@
 using Unity.Mathematics;
-using Unity.Burst;
+using Unity.Profiling;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 
-namespace Pathfinding.Util {
+namespace Pathfinding.Collections {
 	/// <summary>
 	/// Replacement for System.Span which is compatible with earlier versions of C#.
 	///
@@ -49,6 +49,19 @@ namespace Pathfinding.Util {
 		}
 
 		/// <summary>
+		/// Creates a new UnsafeSpan from a 2D C# array.
+		/// The array is pinned to ensure it does not move while the span is in use.
+		///
+		/// You must unpin the pinned memory using UnsafeUtility.ReleaseGCObject when you are done with the span.
+		/// </summary>
+		public unsafe UnsafeSpan(T[,] data, out ulong gcHandle) {
+			unsafe {
+				this.ptr = (T*)UnsafeUtility.PinGCArrayAndGetDataAddress(data, out gcHandle);
+			}
+			this.length = (uint)data.Length;
+		}
+
+		/// <summary>
 		/// Allocates a new UnsafeSpan with the specified length.
 		/// The memory is not initialized.
 		///
@@ -57,7 +70,7 @@ namespace Pathfinding.Util {
 		public UnsafeSpan(Allocator allocator, int length) {
 			unsafe {
 				if (length < 0) throw new System.ArgumentOutOfRangeException();
-				if (length > 0) this.ptr = AllocatorManager.Allocate<T>(allocator, length);
+				if (length > 0) this.ptr = (T*)UnsafeUtility.MallocTracked(length * (long)UnsafeUtility.SizeOf<T>(), UnsafeUtility.AlignOf<T>(), allocator, 1);
 				else this.ptr = null;
 				this.length = (uint)length;
 			}
@@ -66,6 +79,7 @@ namespace Pathfinding.Util {
 		public ref T this[int index] {
 			// With aggressive inlining the performance of indexing is essentially the same as indexing into a native C# array
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			[IgnoredByDeepProfiler]
 			get {
 				unsafe {
 					if ((uint)index >= length) throw new System.IndexOutOfRangeException();
@@ -78,6 +92,7 @@ namespace Pathfinding.Util {
 		public ref T this[uint index] {
 			// With aggressive inlining the performance of indexing is essentially the same as indexing into a native C# array
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			[IgnoredByDeepProfiler]
 			get {
 				unsafe {
 					if (index >= length) throw new System.IndexOutOfRangeException();
@@ -99,6 +114,20 @@ namespace Pathfinding.Util {
 			unsafe {
 				if (sizeof(T) != sizeof(U)) throw new System.InvalidOperationException("Cannot reinterpret span because the size of the types do not match");
 				return new UnsafeSpan<U>(ptr, (int)length);
+			}
+		}
+
+		/// <summary>
+		/// Returns a copy of this span, but with a different data-type.
+		/// The new data-type does not need to have the same size as the old one.
+		/// </summary>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public UnsafeSpan<U> Reinterpret<U>(int expectedOriginalTypeSize) where U : unmanaged {
+			unsafe {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+				if (sizeof(T) != expectedOriginalTypeSize) throw new System.InvalidOperationException("Cannot reinterpret span because sizeof(T) != expectedOriginalTypeSize");
+#endif
+				return new UnsafeSpan<U>(ptr, (int)length * sizeof(T) / sizeof(U));
 			}
 		}
 
@@ -180,6 +209,22 @@ namespace Pathfinding.Util {
 		}
 
 		/// <summary>
+		/// Moves this data to a new NativeArray.
+		///
+		/// This transfers ownership of the memory to the NativeArray, without any copying.
+		/// The NativeArray must be disposed when you are done with it.
+		///
+		/// Warning: This span must have been allocated using the specified allocator.
+		/// </summary>
+		public unsafe NativeArray<T> MoveToNativeArray (Allocator allocator) {
+			var arr = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(ptr, Length, allocator);
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+			NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref arr, AtomicSafetyHandle.Create());
+#endif
+			return arr;
+		}
+
+		/// <summary>
 		/// Frees the underlaying memory.
 		///
 		/// Warning: The span must have been allocated using the specified allocator.
@@ -187,7 +232,25 @@ namespace Pathfinding.Util {
 		/// Warning: You must never use this span (or any other span referencing the same memory) again after calling this method.
 		/// </summary>
 		public unsafe void Free (Allocator allocator) {
-			if (length > 0) AllocatorManager.Free<T>(allocator, ptr, (int)length);
+			if (length > 0) UnsafeUtility.FreeTracked(ptr, allocator);
+		}
+
+		/// <summary>
+		/// Returns a new span with a different size, copies the current data over to it, and frees this span.
+		///
+		/// The new span may be larger or smaller than the current span. If it is larger, the new elements will be uninitialized.
+		///
+		/// Warning: The span must have been allocated using the specified allocator.
+		///
+		/// Warning: You must never use the old span (or any other span referencing the same memory) again after calling this method.
+		///
+		/// Returns: The new span.
+		/// </summary>
+		public unsafe UnsafeSpan<T> Reallocate (Allocator allocator, int newSize) {
+			var newSpan = new UnsafeSpan<T>(allocator, newSize);
+			Slice(0, System.Math.Min(newSize, Length)).CopyTo(newSpan);
+			Free(allocator);
+			return newSpan;
 		}
 	}
 
@@ -216,7 +279,7 @@ namespace Pathfinding.Util {
 		/// The span must be large enough to hold the contents of the array.
 		/// </summary>
 		public static void CopyFrom<T>(this UnsafeSpan<T> span, NativeArray<T> array) where T : unmanaged {
-			CopyFrom(span, array.AsUnsafeReadOnlySpan());
+			array.AsUnsafeReadOnlySpan().CopyTo(span);
 		}
 
 		/// <summary>
@@ -224,11 +287,7 @@ namespace Pathfinding.Util {
 		/// The span must be large enough to hold the contents of the array.
 		/// </summary>
 		public static void CopyFrom<T>(this UnsafeSpan<T> span, UnsafeSpan<T> other) where T : unmanaged {
-			if (other.Length > span.Length) throw new System.InvalidOperationException();
-			if (other.Length == 0) return;
-			unsafe {
-				UnsafeUtility.MemCpy(span.ptr, other.ptr, (long)sizeof(T) * (long)other.Length);
-			}
+			other.CopyTo(span);
 		}
 
 		/// <summary>

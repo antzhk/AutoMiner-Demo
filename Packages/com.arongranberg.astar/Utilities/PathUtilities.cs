@@ -1,4 +1,5 @@
 using Pathfinding.Util;
+using Pathfinding.Pooling;
 using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
@@ -113,7 +114,7 @@ namespace Pathfinding {
 		/// See: bitmasks (view in online documentation for working links).
 		///
 		/// Returns: A List<Node> containing all nodes reachable from the seed node.
-		/// For better memory management the returned list should be pooled, see Pathfinding.Util.ListPool.
+		/// For better memory management the returned list should be pooled, see Pathfinding.Pooling.ListPool.
 		/// </summary>
 		/// <param name="seed">The node to start the search from.</param>
 		/// <param name="tagMask">Optional mask for tags. This is a bitmask.</param>
@@ -175,7 +176,7 @@ namespace Pathfinding {
 		/// so don't use it too often or it might affect the framerate of your game.
 		///
 		/// Returns: A List<GraphNode> containing all nodes reachable up to a specified node distance from the seed node.
-		/// For better memory management the returned list should be pooled, see Pathfinding.Util.ListPool
+		/// For better memory management the returned list should be pooled, see Pathfinding.Pooling.ListPool
 		///
 		/// Warning: This method is not thread safe. Only use it from the Unity thread (i.e normal game code).
 		///
@@ -261,7 +262,7 @@ namespace Pathfinding {
 		/// has an upper bound on the number of steps, so it does not yield a log factor.
 		///
 		/// Note: Consider recycling the list after usage to reduce allocations.
-		/// See: Pathfinding.Util.ListPool
+		/// See: Pathfinding.Pooling.ListPool
 		/// </summary>
 		public static List<Vector3> GetSpiralPoints (int count, float clearance) {
 			List<Vector3> pts = ListPool<Vector3>.Claim(count);

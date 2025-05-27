@@ -262,6 +262,32 @@ namespace Pathfinding {
 		bool pathPending { get; }
 
 		/// <summary>
+		/// Determines if the character's position should be coupled to the Transform's position.
+		/// If false then all movement calculations will happen as usual, but the GameObject that this component is attached to will not move.
+		/// Instead, only the <see cref="position"/> property will change.
+		///
+		/// This is useful if you want to control the movement of the character using some other means, such
+		/// as root motion, but still want the AI to move freely.
+		///
+		/// See: <see cref="canMove"/> which in contrast to this field will disable all movement calculations.
+		/// See: <see cref="updateRotation"/>
+		/// </summary>
+		bool updatePosition { get; set; }
+
+		/// <summary>
+		/// Determines if the character's rotation should be coupled to the Transform's rotation.
+		/// If false then all movement calculations will happen as usual, but the GameObject that this component is attached to will not rotate.
+		/// Instead, only the <see cref="rotation"/> property will change.
+		///
+		/// This is particularly useful for 2D games where you want the Transform to stay in the same orientation, and instead swap out the displayed
+		/// sprite to indicate the direction the character is facing.
+		///
+		/// See: <see cref="updatePosition"/>
+		/// See: <see cref="rotation"/>
+		/// </summary>
+		bool updateRotation { get; set; }
+
+		/// <summary>
 		/// Gets or sets if the agent should stop moving.
 		/// If this is set to true the agent will immediately start to slow down as quickly as it can to come to a full stop.
 		/// The agent will still react to local avoidance and gravity (if applicable), but it will not try to move in any particular direction.

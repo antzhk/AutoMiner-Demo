@@ -65,6 +65,8 @@ namespace Pathfinding {
 			// We store the list of scripts that have been reset in the editor prefs, for each project.
 			// Unity stores its gizmo preferences in the Library folder. So it will be per-user and per-project.
 			// We won't be able to detect if the user deletes and then rebuilds their library folder, though.
+			// Note: Unity may return false for TryGetGizmoInfo the first time it is called for a script.
+			// But the second time a user adds a component (and thus resets it), this should work.
 			if (UnityEditor.GizmoUtility.TryGetGizmoInfo(GetType(), out var gizmoInfo) && gizmoInfo.hasIcon) {
 				var resetPaths = UnityEditor.EditorPrefs.GetString("AstarPathfindingProject.HasResetShowIconGizmos", "");
 				var splits = resetPaths.Split(',');

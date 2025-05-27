@@ -1,5 +1,6 @@
 using UnityEngine;
 using Unity.Mathematics;
+using Pathfinding.Pooling;
 
 namespace Pathfinding {
 	/// <summary>
@@ -140,8 +141,7 @@ namespace Pathfinding {
 		}
 
 		protected override void Prepare () {
-			nnConstraint.tags = enabledTags;
-			var startNNInfo  = AstarPath.active.GetNearest(startPoint, nnConstraint);
+			var startNNInfo  = GetNearest(startPoint);
 
 			startPoint = startNNInfo.position;
 			endPoint = startPoint;

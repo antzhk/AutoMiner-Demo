@@ -3,9 +3,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 
 namespace Pathfinding.ECS {
-	using Pathfinding;
-	using Pathfinding.Util;
-
 	/// <summary>
 	/// Holds the final movement data for an entity.
 	/// This is the data that is used by the movement system to move the entity.

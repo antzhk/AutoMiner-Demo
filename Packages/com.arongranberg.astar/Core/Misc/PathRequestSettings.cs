@@ -1,10 +1,18 @@
 namespace Pathfinding {
+	/// <summary>
+	/// Settings for how an agent searches for paths.
+	///
+	/// This struct contains information about which graphs the agent can use, which nodes it can traverse, and if any nodes should be easier or harder to traverse.
+	///
+	/// See: <see cref="FollowerEntity.pathfindingSettings"/>
+	/// See: <see cref="Path.UseSettings"/>
+	/// </summary>
 	[System.Serializable]
 	public struct PathRequestSettings {
 		/// <summary>
 		/// Graphs that this agent can use.
 		/// This field determines which graphs will be considered when searching for the start and end nodes of a path.
-		/// It is useful in numerous situations, for example if you want to make one graph for small units and one graph for large units.
+		/// It is useful in numerous situations, for example if you want to make one graph for small units and one graph for large units, or one graph for people and one graph for ships.
 		///
 		/// This is a bitmask so if you for example want to make the agent only use graph index 3 then you can set this to:
 		/// <code> settings.graphMask = 1 << 3; </code>
@@ -35,14 +43,25 @@ namespace Pathfinding {
 		/// The penalty for each tag.
 		///
 		/// If null, all penalties will be treated as zero. Otherwise, the array should always have a length of exactly 32.
+		///
+		/// [Open online documentation to see images]
+		///
+		/// See: tags (view in online documentation for working links)
 		/// </summary>
 		public int[] tagPenalties;
 
 		/// <summary>
 		/// The tags which this agent can traverse.
 		///
-		/// Note: This field is a bitmask.
+		/// This is a bitmask. Each bit indicates that the agent can traverse nodes with the corresponding tag.
+		/// If a bit is not set, the agent will treat it as if it is not traversable.
+		///
+		/// The default value is -1, which sets all bits, and indicates that the agent can traverse all tags.
+		///
+		/// [Open online documentation to see images]
+		///
 		/// See: bitmasks (view in online documentation for working links)
+		/// See: tags (view in online documentation for working links)
 		/// </summary>
 		public int traversableTags;
 
@@ -61,6 +80,7 @@ namespace Pathfinding {
 		/// </summary>
 		public ITraversalProvider traversalProvider;
 
+		/// <summary>A PathRequestSettings instance with default values for all fields</summary>
 		public static PathRequestSettings Default => new PathRequestSettings {
 			graphMask = GraphMask.everything,
 			tagPenalties = new int[32],

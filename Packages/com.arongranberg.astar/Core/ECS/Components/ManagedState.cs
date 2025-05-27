@@ -24,8 +24,8 @@ namespace Pathfinding.ECS {
 		///
 		/// Deprecated: Use <see cref="FollowerEntity.autoRepath"/>, or the <see cref="Pathfinding.ECS.AutoRepathPolicy"/> component instead.
 		/// </summary>
-		[System.Obsolete("Use FollowerEntity.autoRepath, or the Pathfinding.ECS.AutoRepathPolicy component instead")]
-		public Pathfinding.AutoRepathPolicy autoRepath = new Pathfinding.AutoRepathPolicy();
+		[System.Obsolete("Use FollowerEntity.autoRepath, or the Pathfinding.ECS.AutoRepathPolicy component instead", true)]
+		public Pathfinding.AutoRepathPolicy autoRepath => null;
 
 		/// <summary>Calculates in which direction to move to follow the path</summary>
 		public PathTracer pathTracer;
@@ -63,6 +63,9 @@ namespace Pathfinding.ECS {
 		/// The gravity applied is Physics.gravity.y.
 		///
 		/// Enabling this will add the <see cref="GravityState"/> component to the entity.
+		///
+		/// This has no effect if the agent's orientation is set to YAxisForward (2D mode).
+		/// Gravity does not really make sense for top-down 2D games. The gravity setting is also hidden from the inspector in this mode.
 		/// </summary>
 		public bool enableGravity = true;
 
@@ -199,9 +202,6 @@ namespace Pathfinding.ECS {
 		/// </summary>
 		object System.ICloneable.Clone () {
 			return new ManagedState {
-						#pragma warning disable 618
-					   autoRepath = autoRepath.Clone(),
-						#pragma warning restore 618
 					   pathTracer = pathTracer.Clone(),
 					   rvoSettings = rvoSettings,
 					   pathfindingSettings = new PathRequestSettings {

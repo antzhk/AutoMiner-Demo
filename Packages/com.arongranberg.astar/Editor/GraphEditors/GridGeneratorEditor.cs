@@ -202,7 +202,6 @@ namespace Pathfinding {
 			}
 
 			if ((nodeSizeChanged && locked) || (newWidth != graph.width || newDepth != graph.depth) || prevRatio != graph.aspectRatio) {
-				graph.nodeSize = newNodeSize;
 				graph.SetDimensions(newWidth, newDepth, newNodeSize);
 
 				normalizedPivotPoint = NormalizedPivotPoint(graph, pivot);

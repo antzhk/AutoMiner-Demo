@@ -1,9 +1,22 @@
 using UnityEngine;
 using Unity.Mathematics;
 using System.Runtime.CompilerServices;
+using Unity.Profiling;
 
 namespace Pathfinding {
-	/// <summary>Holds a coordinate in integers</summary>
+	/// <summary>
+	/// Holds a coordinate in (integer) millimeters.
+	///
+	/// This is used for node coordinates and other things, primarily to avoid floating point calculations in the core pathfinding routines (as they can be slow and non-deterministic if you are not careful).
+	///
+	/// You can cast back and forth between Vector3s and Int3s like:
+	/// <code>
+	/// Int3 intPoint = (Int3)transform.position;
+	/// transform.position = (Vector3)intPoint;
+	/// </code>
+	///
+	/// During the cast, the coordinates will be rounded to the nearest millimeter.
+	/// </summary>
 	public struct Int3 : System.IEquatable<Int3> {
 		public int x;
 		public int y;
@@ -41,21 +54,21 @@ namespace Pathfinding {
 			z = _z;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static bool operator == (Int3 lhs, Int3 rhs) {
 			return lhs.x == rhs.x &&
 				   lhs.y == rhs.y &&
 				   lhs.z == rhs.z;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static bool operator != (Int3 lhs, Int3 rhs) {
 			return lhs.x != rhs.x ||
 				   lhs.y != rhs.y ||
 				   lhs.z != rhs.z;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static explicit operator Int3 (Vector3 ob) {
 			return new Int3(
 				(int)System.Math.Round(ob.x*FloatPrecision),
@@ -64,22 +77,22 @@ namespace Pathfinding {
 				);
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static explicit operator Vector3 (Int3 ob) {
 			return new Vector3(ob.x*PrecisionFactor, ob.y*PrecisionFactor, ob.z*PrecisionFactor);
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static explicit operator float3 (Int3 ob) {
 			return (float3)(int3)ob*PrecisionFactor;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static explicit operator int3 (Int3 ob) {
 			return new int3(ob.x, ob.y, ob.z);
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static Int3 operator - (Int3 lhs, Int3 rhs) {
 			lhs.x -= rhs.x;
 			lhs.y -= rhs.y;
@@ -87,7 +100,7 @@ namespace Pathfinding {
 			return lhs;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static Int3 operator - (Int3 lhs) {
 			lhs.x = -lhs.x;
 			lhs.y = -lhs.y;
@@ -95,7 +108,7 @@ namespace Pathfinding {
 			return lhs;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static Int3 operator + (Int3 lhs, Int3 rhs) {
 			lhs.x += rhs.x;
 			lhs.y += rhs.y;
@@ -103,7 +116,7 @@ namespace Pathfinding {
 			return lhs;
 		}
 
-		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+		[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 		public static Int3 operator * (Int3 lhs, int rhs) {
 			lhs.x *= rhs;
 			lhs.y *= rhs;
@@ -136,11 +149,11 @@ namespace Pathfinding {
 		}
 
 		public int this[int i] {
-			[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+			[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 			get {
 				return i == 0 ? x : (i == 1 ? y : z);
 			}
-			[MethodImplAttribute(MethodImplOptions.AggressiveInlining)]
+			[MethodImplAttribute(MethodImplOptions.AggressiveInlining)][IgnoredByDeepProfiler]
 			set {
 				if (i == 0) x = value;
 				else if (i == 1) y = value;
@@ -266,93 +279,6 @@ namespace Pathfinding {
 
 		public override int GetHashCode () {
 			return x*73856093 ^ y*19349669 ^ z*83492791;
-		}
-	}
-
-	/// <summary>Two Dimensional Integer Coordinate Pair</summary>
-	public struct Int2 : System.IEquatable<Int2> {
-		public int x;
-		public int y;
-
-		public Int2 (int x, int y) {
-			this.x = x;
-			this.y = y;
-		}
-
-		public long sqrMagnitudeLong {
-			get {
-				return (long)x*(long)x+(long)y*(long)y;
-			}
-		}
-
-		public static explicit operator int2 (Int2 a) {
-			return new int2(a.x, a.y);
-		}
-
-		public static Int2 operator - (Int2 lhs) {
-			lhs.x = -lhs.x;
-			lhs.y = -lhs.y;
-			return lhs;
-		}
-
-		public static Int2 operator + (Int2 a, Int2 b) {
-			return new Int2(a.x+b.x, a.y+b.y);
-		}
-
-		public static Int2 operator - (Int2 a, Int2 b) {
-			return new Int2(a.x-b.x, a.y-b.y);
-		}
-
-		public static bool operator == (Int2 a, Int2 b) {
-			return a.x == b.x && a.y == b.y;
-		}
-
-		public static bool operator != (Int2 a, Int2 b) {
-			return a.x != b.x || a.y != b.y;
-		}
-
-		/// <summary>Dot product of the two coordinates</summary>
-		public static long DotLong (Int2 a, Int2 b) {
-			return (long)a.x*(long)b.x + (long)a.y*(long)b.y;
-		}
-
-		public override bool Equals (System.Object o) {
-			if (!(o is Int2)) return false;
-			var rhs = (Int2)o;
-
-			return x == rhs.x && y == rhs.y;
-		}
-
-		#region IEquatable implementation
-
-		public bool Equals (Int2 other) {
-			return x == other.x && y == other.y;
-		}
-
-		#endregion
-
-		public override int GetHashCode () {
-			return x*49157+y*98317;
-		}
-
-		public static Int2 Min (Int2 a, Int2 b) {
-			return new Int2(System.Math.Min(a.x, b.x), System.Math.Min(a.y, b.y));
-		}
-
-		public static Int2 Max (Int2 a, Int2 b) {
-			return new Int2(System.Math.Max(a.x, b.x), System.Math.Max(a.y, b.y));
-		}
-
-		public static Int2 FromInt3XZ (Int3 o) {
-			return new Int2(o.x, o.z);
-		}
-
-		public static Int3 ToInt3XZ (Int2 o) {
-			return new Int3(o.x, 0, o.y);
-		}
-
-		public override string ToString () {
-			return "("+x+", " +y+")";
 		}
 	}
 }

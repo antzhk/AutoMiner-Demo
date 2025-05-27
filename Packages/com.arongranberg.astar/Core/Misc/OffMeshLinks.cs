@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Profiling;
-using Pathfinding.Graphs.Navmesh;
-using Pathfinding.Util;
+using Pathfinding.Pooling;
+using Pathfinding.Collections;
 using System;
 using UnityEngine.Assertions;
 

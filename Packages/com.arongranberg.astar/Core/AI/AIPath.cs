@@ -14,17 +14,17 @@ namespace Pathfinding {
 	/// This script works well for many types of units, but if you need the highest performance (for example if you are moving hundreds of characters) you
 	/// may want to customize this script or write a custom movement script to be able to optimize it specifically for your game.
 	///
-	/// This script will try to move to a given <see cref="destination"/>. At <see cref="repathRate regular"/>, the path to the destination will be recalculated.
+	/// This script will try to move to a given <see cref="destination"/>. At <see cref="Pathfinding.AutoRepathPolicy.period;regular intervals"/>, the path to the destination will be recalculated.
 	/// If you want to make the AI to follow a particular object you can attach the <see cref="Pathfinding.AIDestinationSetter"/> component.
 	/// Take a look at the getstarted (view in online documentation for working links) tutorial for more instructions on how to configure this script.
 	///
-	/// Here is a video of this script being used move an agent around (technically it uses the <see cref="Pathfinding.Examples.MineBotAI"/> script that inherits from this one but adds a bit of animation support for the example scenes):
+	/// Here is a video of this script being used move an agent around (it also uses the <see cref="MineBotAnimation"/> component to drive the animations):
 	/// [Open online documentation to see videos]
 	///
 	/// \section variables Quick overview of the variables
 	/// In the inspector in Unity, you will see a bunch of variables. You can view detailed information further down, but here's a quick overview.
 	///
-	/// The <see cref="repathRate"/> determines how often it will search for new paths, if you have fast moving targets, you might want to set it to a lower value.
+	/// The <see cref="Pathfinding.AutoRepathPolicy.period;period setting"/> determines how often it will search for new paths, if you have fast moving targets, you might want to set it to a lower value.
 	/// The <see cref="destination"/> field is where the AI will try to move, it can be a point on the ground where the player has clicked in an RTS for example.
 	/// Or it can be the player object in a zombie game.
 	/// The <see cref="maxSpeed"/> is self-explanatory, as is <see cref="rotationSpeed"/>. however <see cref="slowdownDistance"/> might require some explanation:
@@ -58,6 +58,7 @@ namespace Pathfinding {
 	/// </summary>
 	[AddComponentMenu("Pathfinding/AI/AIPath (2D,3D)")]
 	[UniqueComponent(tag = "ai")]
+	[DisallowMultipleComponent]
 	public partial class AIPath : AIBase, IAstarAI {
 		/// <summary>
 		/// How quickly the agent accelerates.
@@ -262,7 +263,7 @@ namespace Pathfinding {
 		/// also create a new script which inherits from this one and override the function in that script.
 		///
 		/// This method will be called again if a new path is calculated as the destination may have changed.
-		/// So when the agent is close to the destination this method will typically be called every <see cref="repathRate"/> seconds.
+		/// So when the agent is close to the destination this method will typically be called every <see cref="Pathfinding.AutoRepathPolicy.period;period"/> seconds.
 		///
 		/// Deprecated: Avoid overriding this method. Instead poll the <see cref="reachedDestination"/> or <see cref="reachedEndOfPath"/> properties.
 		/// </summary>

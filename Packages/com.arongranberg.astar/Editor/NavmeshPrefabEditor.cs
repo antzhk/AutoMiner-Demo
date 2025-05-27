@@ -3,7 +3,7 @@ using UnityEngine;
 using System.Linq;
 
 namespace Pathfinding {
-	using Pathfinding.Util;
+	using Pathfinding.Sync;
 
 	/// <summary>Editor for the <see cref="NavmeshPrefab"/> component</summary>
 	[CustomEditor(typeof(NavmeshPrefab), true)]
@@ -98,7 +98,7 @@ namespace Pathfinding {
 				needsRounding = roundedTiles.Any(x => x.needsRounding);
 
 				if (needsRounding) {
-					EditorGUILayout.HelpBox("Bounds size is not a multiple of the recast graph's tile size (" + (graph.editorTileSize * graph.cellSize).ToString("0.0") + ").\nThe tile size is cell size * tile size in voxels (set in recast graph settings)", MessageType.Warning);
+					EditorGUILayout.HelpBox("Bounds size is not a multiple of the recast graph's tile size (" + (graph.editorTileSize * graph.cellSize).ToString("0.0") + ").\nThe tile size is voxel size * tile size (voxels) (set in recast graph settings)", MessageType.Warning);
 					if (GUILayout.Button("Round to nearest multiple")) {
 						UnityEditor.Undo.RecordObjects(targets, "Snap to nearest tile multiple");
 						for (int i = 0; i < targets.Length; i++) {

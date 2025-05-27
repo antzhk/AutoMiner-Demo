@@ -36,6 +36,7 @@ namespace Pathfinding {
 	[RequireComponent(typeof(Seeker))]
 	[AddComponentMenu("Pathfinding/AI/AILerp (2D,3D)")]
 	[UniqueComponent(tag = "ai")]
+	[DisallowMultipleComponent]
 	[HelpURL("https://arongranberg.com/astar/documentation/stable/ailerp.html")]
 	public class AILerp : VersionedMonoBehaviour, IAstarAI {
 		/// <summary>
@@ -93,17 +94,6 @@ namespace Pathfinding {
 		/// </summary>
 		[UnityEngine.Serialization.FormerlySerializedAs("rotationIn2D")]
 		public OrientationMode orientation = OrientationMode.ZAxisForward;
-
-		/// <summary>
-		/// If true, the forward axis of the character will be along the Y axis instead of the Z axis.
-		///
-		/// Deprecated: Use <see cref="orientation"/> instead
-		/// </summary>
-		[System.Obsolete("Use orientation instead")]
-		public bool rotationIn2D {
-			get { return orientation == OrientationMode.YAxisForward; }
-			set { orientation = value ? OrientationMode.YAxisForward : OrientationMode.ZAxisForward; }
-		}
 
 		/// <summary>
 		/// If true, the AI will rotate to face the movement direction.
@@ -173,8 +163,7 @@ namespace Pathfinding {
 		/// See: <see cref="canMove"/> which in contrast to this field will disable all movement calculations.
 		/// See: <see cref="updateRotation"/>
 		/// </summary>
-		[System.NonSerialized]
-		public bool updatePosition = true;
+		public bool updatePosition { get; set; } = true;
 
 		/// <summary>
 		/// Determines if the character's rotation should be coupled to the Transform's rotation.
@@ -183,8 +172,7 @@ namespace Pathfinding {
 		///
 		/// See: <see cref="updatePosition"/>
 		/// </summary>
-		[System.NonSerialized]
-		public bool updateRotation = true;
+		public bool updateRotation { get; set; } = true;
 
 		/// <summary>
 		/// Cached delegate for the <see cref="OnPathComplete"/> method.
@@ -192,30 +180,6 @@ namespace Pathfinding {
 		/// Caching this avoids allocating a new one every time a path is calculated, which reduces GC pressure.
 		/// </summary>
 		protected OnPathDelegate onPathComplete;
-
-		/// <summary>
-		/// Target to move towards.
-		/// The AI will try to follow/move towards this target.
-		/// It can be a point on the ground where the player has clicked in an RTS for example, or it can be the player object in a zombie game.
-		///
-		/// Deprecated: In 4.0 this will automatically add a <see cref="Pathfinding.AIDestinationSetter"/> component and set the target on that component.
-		/// Try instead to use the <see cref="destination"/> property which does not require a transform to be created as the target or use
-		/// the AIDestinationSetter component directly.
-		/// </summary>
-		[System.Obsolete("Use the destination property or the AIDestinationSetter component instead")]
-		public Transform target {
-			get {
-				var setter = GetComponent<AIDestinationSetter>();
-				return setter != null ? setter.target : null;
-			}
-			set {
-				targetCompatibility = null;
-				var setter = GetComponent<AIDestinationSetter>();
-				if (setter == null) setter = gameObject.AddComponent<AIDestinationSetter>();
-				setter.target = value;
-				destination = value != null ? value.position : new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
-			}
-		}
 
 		/// <summary>\copydoc Pathfinding::IAstarAI::position</summary>
 		public Vector3 position { get { return updatePosition ? tr.position : simulatedPosition; } }
@@ -371,10 +335,6 @@ namespace Pathfinding {
 		Vector3 previousPosition1, previousPosition2, simulatedPosition;
 		Quaternion simulatedRotation;
 
-		/// <summary>Required for serialization backward compatibility</summary>
-		[UnityEngine.Serialization.FormerlySerializedAs("target")][SerializeField][HideInInspector]
-		Transform targetCompatibility;
-
 		[SerializeField]
 		[HideInInspector]
 		[UnityEngine.Serialization.FormerlySerializedAs("repathRate")]
@@ -480,15 +440,6 @@ namespace Pathfinding {
 			get {
 				return canSearchAgain && autoRepath.ShouldRecalculatePath(position, 0.0f, destination, Time.time);
 			}
-		}
-
-		/// <summary>
-		/// Requests a path to the target.
-		/// Deprecated: Use <see cref="SearchPath"/> instead.
-		/// </summary>
-		[System.Obsolete("Use SearchPath instead")]
-		public virtual void ForceSearchPath () {
-			SearchPath();
 		}
 
 		/// <summary>Requests a path to the target.</summary>
@@ -757,9 +708,6 @@ namespace Pathfinding {
 					canSearch = canSearchCompability;
 				}
 			}
-			#pragma warning disable 618
-			if (unityThread && targetCompatibility != null) target = targetCompatibility;
-			#pragma warning restore 618
 		}
 
 		public override void DrawGizmos () {
