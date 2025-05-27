@@ -27,8 +27,13 @@ public class ResourceSpawner : MonoBehaviour
 
         timer = 0f;
 
-        var resoucrceConfig = resourceConfigs[Random.Range(0, resourceConfigs.Count)];
+        for (int i = 0; i < spawn_count; i++)
+        {
+            var resoucrceConfig = resourceConfigs[Random.Range(0, resourceConfigs.Count)];
 
-        ItemSpot.CreateSpot(resoucrceConfig, zone.GetRandomSpawnPosition(), prefab_key);
+            ItemSpot.CreateSpot(resoucrceConfig, zone.GetSafeSpawnPosition(), prefab_key);
+        }
+        
+        AstarPath.active.Scan();
     }
 }

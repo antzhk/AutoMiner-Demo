@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 
@@ -24,24 +25,6 @@ public class ItemSpot : MonoBehaviour
     {
         itemsSpots.Remove(this);
     }
-
-    public static ItemSpot CreateSpot(ItemConfig config, Vector3 position, string spot)
-    {
-        var prefab = Addressables.LoadAssetAsync<GameObject>(spot).WaitForCompletion();
-
-        var obj = Instantiate(prefab, position, Quaternion.identity);
-
-        var itemSpot = obj.GetComponent<ItemSpot>();
-        
-        itemSpot.SetItem(config);
-
-        return itemSpot;
-    }
-
-    public static int GetSpotsCount()
-    {
-        return itemsSpots.Count;
-    }
     
     public bool HasMiner()
     {
@@ -51,6 +34,11 @@ public class ItemSpot : MonoBehaviour
     public void SetMiner(Miner miner)
     {
         this.currentMiner = miner;
+    }
+
+    public void RemoveMiner()
+    {
+        this.currentMiner = null;
     }
 
     public int Harvest(int count)
@@ -67,10 +55,30 @@ public class ItemSpot : MonoBehaviour
             returnedCount = this.itemCount;
             this.itemCount = 0;
             
-            Destroy(this);
+            Destroy(this.gameObject);
         }
 
         return returnedCount;
+    }
+    
+    public static ItemSpot CreateSpot(ItemConfig config, Vector3 position, string spot)
+    {
+        var prefab = Addressables.LoadAssetAsync<GameObject>(spot).WaitForCompletion();
+
+        var obj = Instantiate(prefab, position, Quaternion.identity);
+
+        var itemSpot = obj.GetComponent<ItemSpot>();
+        
+        itemSpot.SetItem(config);
+
+        return itemSpot;
+    }
+
+    public static List<ItemSpot> GetAllSpots() => itemsSpots;
+
+    public static int GetSpotsCount()
+    {
+        return itemsSpots.Count;
     }
 
     private void SetItem(ItemConfig config)

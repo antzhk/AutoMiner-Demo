@@ -17,8 +17,18 @@ MonoBehaviour:
     m_SerializedData: []
   m_GUID: 0157dd984fd674f45b6996bdf70a857f
   m_SerializeEntries:
+  - m_GUID: afaa37ec4050c32428625b899fd380a6
+    m_Address: Assets/Prefabs/Miner 1.prefab
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: e2ba3f666b906ad4fb05c3e9b28eb3d6
     m_Address: Assets/Prefabs/BasicSpot.prefab
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: f9dfbde2eb865b74c9d78a691a65da19
+    m_Address: Assets/Prefabs/Miner.prefab
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0
